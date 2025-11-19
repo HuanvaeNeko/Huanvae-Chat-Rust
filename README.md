@@ -49,11 +49,11 @@ src/auth/
 - PostgreSQL 18.1+
 - Podman/Docker
 
-### 2. 启动 PostgreSQL
+### 2. 启动
 
 ```bash
 cd /home/huanwei/new-huanvae-chat
-podman-compose up -d postgres
+podman-compose up -d 
 ```
 
 ### 3. 构建项目
