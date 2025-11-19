@@ -1,0 +1,279 @@
+use crate::auth::{
+    errors::AuthError,
+    models::{AccessTokenClaims, CreateRefreshToken, RefreshTokenClaims, TokenResponse},
+    utils::{generate_device_id, generate_jti, KeyManager},
+};
+use chrono::{Duration, Utc};
+use jsonwebtoken::{encode, decode, Header, Validation, Algorithm};
+use sqlx::PgPool;
+
+/// Token 服务（生成、验证、刷新）
+pub struct TokenService {
+    key_manager: KeyManager,
+    pub(crate) db: PgPool,  // 允许在 auth 模块内部访问
+}
+
+impl TokenService {
+    /// 创建新的 TokenService
+    pub fn new(key_manager: KeyManager, db: PgPool) -> Self {
+        Self { key_manager, db }
+    }
+
+    /// 生成 Token 对（Access Token + Refresh Token）
+    pub async fn generate_token_pair(
+        &self,
+        user_id: &str,
+        email: &str,
+        device_info: Option<String>,
+        mac_address: Option<String>,
+        ip_address: Option<String>,
+    ) -> Result<TokenResponse, AuthError> {
+        let device_id = generate_device_id();
+        let token_id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now();
+
+        // 生成 Access Token (15分钟)
+        let access_token = self.generate_access_token(
+            user_id,
+            email,
+            &device_id,
+            device_info.as_deref().unwrap_or("Unknown"),
+            mac_address.as_deref().unwrap_or("Unknown"),
+        )?;
+
+        // 生成 Refresh Token (7天)
+        let refresh_token = self.generate_refresh_token(user_id, &device_id, &token_id)?;
+
+        // 保存 Refresh Token 到数据库
+        let expires_at = (now + Duration::days(7)).naive_utc();
+        let create_token = CreateRefreshToken {
+            token_id,
+            user_id: user_id.to_string(),
+            refresh_token: refresh_token.clone(),
+            device_id,
+            device_info,
+            ip_address,
+            expires_at,
+        };
+
+        self.save_refresh_token(&create_token).await?;
+
+        Ok(TokenResponse {
+            access_token,
+            refresh_token,
+            token_type: "Bearer".to_string(),
+            expires_in: 900, // 15分钟
+        })
+    }
+
+    /// 生成 Access Token (15分钟)
+    fn generate_access_token(
+        &self,
+        user_id: &str,
+        email: &str,
+        device_id: &str,
+        device_info: &str,
+        mac_address: &str,
+    ) -> Result<String, AuthError> {
+        let now = Utc::now();
+        let expires_at = now + Duration::minutes(15);
+
+        let claims = AccessTokenClaims {
+            sub: user_id.to_string(),
+            email: email.to_string(),
+            device_id: device_id.to_string(),
+            device_info: device_info.to_string(),
+            mac_address: mac_address.to_string(),
+            jti: generate_jti(),
+            exp: expires_at.timestamp(),
+            iat: now.timestamp(),
+        };
+
+        let token = encode(
+            &Header::new(Algorithm::RS256),
+            &claims,
+            self.key_manager.encoding_key(),
+        )?;
+
+        Ok(token)
+    }
+
+    /// 生成 Refresh Token (7天)
+    fn generate_refresh_token(
+        &self,
+        user_id: &str,
+        device_id: &str,
+        token_id: &str,
+    ) -> Result<String, AuthError> {
+        let now = Utc::now();
+        let expires_at = now + Duration::days(7);
+
+        let claims = RefreshTokenClaims {
+            sub: user_id.to_string(),
+            device_id: device_id.to_string(),
+            token_id: token_id.to_string(),
+            exp: expires_at.timestamp(),
+            iat: now.timestamp(),
+        };
+
+        let token = encode(
+            &Header::new(Algorithm::RS256),
+            &claims,
+            self.key_manager.encoding_key(),
+        )?;
+
+        Ok(token)
+    }
+
+    /// 验证并解析 Access Token
+    pub fn verify_access_token(&self, token: &str) -> Result<AccessTokenClaims, AuthError> {
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.validate_exp = true;
+
+        let token_data = decode::<AccessTokenClaims>(
+            token,
+            self.key_manager.decoding_key(),
+            &validation,
+        )?;
+
+        Ok(token_data.claims)
+    }
+
+    /// 验证并解析 Refresh Token
+    pub fn verify_refresh_token(&self, token: &str) -> Result<RefreshTokenClaims, AuthError> {
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.validate_exp = true;
+
+        let token_data = decode::<RefreshTokenClaims>(
+            token,
+            self.key_manager.decoding_key(),
+            &validation,
+        )?;
+
+        Ok(token_data.claims)
+    }
+
+    /// 刷新 Token（用 Refresh Token 换取新的 Access Token）
+    pub async fn refresh_access_token(
+        &self,
+        refresh_token: &str,
+    ) -> Result<String, AuthError> {
+        // 验证 Refresh Token
+        let claims = self.verify_refresh_token(refresh_token)?;
+
+        // 从数据库查询 Refresh Token
+        let db_token: Option<crate::auth::models::RefreshToken> = sqlx::query_as(
+            r#"
+            SELECT * FROM "user-refresh-tokens"
+            WHERE "token-id" = $1 AND "is-revoked" = false
+            "#,
+        )
+        .bind(&claims.token_id)
+        .fetch_optional(&self.db)
+        .await?;
+
+        let db_token = db_token.ok_or(AuthError::InvalidRefreshToken)?;
+
+        // 检查是否过期
+        if db_token.expires_at < Utc::now().naive_utc() {
+            return Err(AuthError::TokenExpired);
+        }
+
+        // 更新最后使用时间
+        sqlx::query(
+            r#"
+            UPDATE "user-refresh-tokens"
+            SET "last-used-at" = $1
+            WHERE "token-id" = $2
+            "#,
+        )
+        .bind(Utc::now())
+        .bind(&claims.token_id)
+        .execute(&self.db)
+        .await?;
+
+        // 查询用户信息
+        let user: crate::auth::models::User = sqlx::query_as(
+            r#"SELECT * FROM "users" WHERE "user-id" = $1"#,
+        )
+        .bind(&claims.sub)
+        .fetch_one(&self.db)
+        .await?;
+
+        // 生成新的 Access Token
+        let access_token = self.generate_access_token(
+            &user.user_id,
+            &user.user_email,
+            &claims.device_id,
+            db_token.device_info.as_deref().unwrap_or("Unknown"),
+            "Unknown",
+        )?;
+
+        Ok(access_token)
+    }
+
+    /// 保存 Refresh Token 到数据库
+    async fn save_refresh_token(&self, token: &CreateRefreshToken) -> Result<(), AuthError> {
+        sqlx::query(
+            r#"
+            INSERT INTO "user-refresh-tokens" (
+                "token-id", "user-id", "refresh-token", "device-id",
+                "device-info", "ip-address", "expires-at"
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            "#,
+        )
+        .bind(&token.token_id)
+        .bind(&token.user_id)
+        .bind(&token.refresh_token)
+        .bind(&token.device_id)
+        .bind(&token.device_info)
+        .bind(&token.ip_address)
+        .bind(token.expires_at)
+        .execute(&self.db)
+        .await?;
+
+        Ok(())
+    }
+
+    /// 撤销 Refresh Token（登出时调用）
+    pub async fn revoke_refresh_token(
+        &self,
+        token_id: &str,
+        reason: Option<String>,
+    ) -> Result<(), AuthError> {
+        sqlx::query(
+            r#"
+            UPDATE "user-refresh-tokens"
+            SET "is-revoked" = true, "revoked-at" = $1, "revoked-reason" = $2
+            WHERE "token-id" = $3
+            "#,
+        )
+        .bind(Utc::now())
+        .bind(reason)
+        .bind(token_id)
+        .execute(&self.db)
+        .await?;
+
+        Ok(())
+    }
+
+    /// 撤销用户所有设备的 Refresh Token（修改密码时调用）
+    pub async fn revoke_all_user_tokens(&self, user_id: &str) -> Result<(), AuthError> {
+        sqlx::query(
+            r#"
+            UPDATE "user-refresh-tokens"
+            SET "is-revoked" = true, "revoked-at" = $1, "revoked-reason" = $2
+            WHERE "user-id" = $3 AND "is-revoked" = false
+            "#,
+        )
+        .bind(Utc::now())
+        .bind("密码已修改")
+        .bind(user_id)
+        .execute(&self.db)
+        .await?;
+
+        Ok(())
+    }
+}
+

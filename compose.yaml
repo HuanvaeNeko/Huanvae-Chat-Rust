@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: docker.io/library/nginx:1.29.3-alpine
+    container_name: huanvae-nginx
+    network_mode: host
+    volumes:
+      - ./Nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./Nginx/ssl:/etc/nginx/ssl:ro
+      - ./Nginx/logs:/var/log/nginx
+    restart: unless-stopped
+
+  postgres:
+    image: docker.io/library/postgres:18.1-alpine
+    container_name: huanvae-postgres
+    network_mode: host
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-huanvae_chat}
+      PGDATA: /pgdata
+    volumes:
+      - ./PostgreSQL/data:/pgdata
+      - ./PostgreSQL/init:/docker-entrypoint-initdb.d
+      - ./PostgreSQL/backup:/backup
+    restart: unless-stopped
+
+  minio:
+    image: docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: huanvae-minio
+    network_mode: host
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
+    volumes:
+      - ./MinIO/data:/data
+    restart: unless-stopped

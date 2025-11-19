@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Auth 测试页</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>认证功能测试</h1>
+
+    <section class="card">
+      <h2>后端设置</h2>
+      <div class="row">
+        <label for="apiBase">API 基地址</label>
+        <input id="apiBase" type="text" placeholder="http://localhost:8080/api/auth" />
+        <button id="saveBase">保存</button>
+      </div>
+      <div class="row">
+        <label for="friendsApiBase">Friends API 基地址</label>
+        <input id="friendsApiBase" type="text" placeholder="http://localhost:8080/api/friends" />
+        <button id="saveFriendsBase">保存</button>
+      </div>
+      <small>仅前端配置，未修改后端</small>
+    </section>
+
+    <section class="card">
+      <h2>注册</h2>
+      <div class="row"><label>用户ID</label><input id="reg_user_id" type="text" /></div>
+      <div class="row"><label>昵称</label><input id="reg_nickname" type="text" /></div>
+      <div class="row"><label>邮箱（可选）</label><input id="reg_email" type="email" /></div>
+      <div class="row"><label>密码</label><input id="reg_password" type="password" /></div>
+      <button id="btnRegister">注册</button>
+      <pre id="regResult" class="result"></pre>
+    </section>
+
+    <section class="card">
+      <h2>登录</h2>
+      <div class="row"><label>用户ID</label><input id="login_user_id" type="text" /></div>
+      <div class="row"><label>密码</label><input id="login_password" type="password" /></div>
+      <div class="row"><label>设备信息（可选）</label><input id="login_device_info" type="text" placeholder="Web" /></div>
+      <div class="row"><label>MAC地址（可选）</label><input id="login_mac" type="text" placeholder="00:00:00:00:00:00" /></div>
+      <button id="btnLogin">登录</button>
+      <pre id="loginResult" class="result"></pre>
+    </section>
+
+    <section class="card">
+      <h2>个人信息</h2>
+      <div class="row">
+        <button id="btnShowProfile">从 Access Token 解析并显示</button>
+        <button id="btnRefreshToken">刷新 Access Token</button>
+      </div>
+      <pre id="profile" class="result"></pre>
+    </section>
+
+    <section class="card">
+      <h2>设备管理</h2>
+      <div class="row">
+        <button id="btnListDevices">获取设备列表</button>
+      </div>
+      <div id="devices"></div>
+      <pre id="deviceResult" class="result"></pre>
+    </section>
+
+    <section class="card">
+      <h2>好友功能</h2>
+      <div class="row">
+        <label>目标用户ID</label>
+        <input id="req_target_user_id" type="text" />
+      </div>
+      <div class="row">
+        <label>申请原因（可选）</label>
+        <input id="req_reason" type="text" />
+      </div>
+      <div class="row">
+        <label>申请时间</label>
+        <input id="req_request_time" type="text" placeholder="ISO 时间，如 2025-11-18T12:00:00.000Z" />
+      </div>
+      <div class="row">
+        <button id="btnSubmitFriend">发起好友申请</button>
+      </div>
+      <pre id="submitReqFmt" class="result"></pre>
+      <pre id="submitResFmt" class="result"></pre>
+
+      <hr />
+
+      <div class="row">
+        <button id="btnListPending">获取待通过申请</button>
+      </div>
+      <div id="pendingList"></div>
+      <pre id="pendingReqFmt" class="result"></pre>
+      <pre id="pendingResFmt" class="result"></pre>
+
+      <hr />
+
+      <div class="row">
+        <button id="btnListSent">获取发出申请</button>
+      </div>
+      <div id="sentList"></div>
+      <pre id="sentReqFmt" class="result"></pre>
+      <pre id="sentResFmt" class="result"></pre>
+
+      <hr />
+
+      <div class="row">
+        <button id="btnListFriends">获取好友列表</button>
+      </div>
+      <div id="friendsList"></div>
+      <pre id="friendsReqFmt" class="result"></pre>
+      <pre id="friendsResFmt" class="result"></pre>
+    </section>
+
+    <section class="card">
+      <h2>本地状态</h2>
+      <div class="row">
+        <button id="btnClear">清空本地 Token</button>
+      </div>
+      <pre id="localState" class="result"></pre>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
