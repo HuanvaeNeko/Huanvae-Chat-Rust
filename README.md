@@ -45,14 +45,12 @@ src/auth/
 ### 1. 安装依赖
 
 确保已安装：
-- Rust 1.75+
-- PostgreSQL 18.1+
+- Rust 1.91
 - Podman/Docker
 
 ### 2. 启动
 
 ```bash
-cd /home/huanwei/new-huanvae-chat
 podman-compose up -d 
 ```
 
@@ -261,11 +259,7 @@ cargo fmt
 cargo clippy
 ```
 
-## 📄 许可证
-
-MIT License
-
 ## 👨‍💻 作者
 
-HuanVae Chat Team
+HuanVae Chat Team --欢伪
 
