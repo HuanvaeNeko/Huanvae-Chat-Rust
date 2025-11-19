@@ -370,6 +370,12 @@ pub user_id: String,
 - Rust: `chrono::NaiveDateTime`
 - JSON: `"2025-11-17T02:41:07.933463"`
 
+#### exp（Unix秒）到 NaiveDateTime 转换
+- 旧用法（会产生废弃警告）：`NaiveDateTime::from_timestamp_opt(exp, 0)`
+- 推荐用法：
+  - `chrono::DateTime::from_timestamp(exp, 0).map(|dt| dt.naive_utc()).unwrap_or(Utc::now().naive_utc())`
+- 说明：当 `exp` 非法时安全回退当前时间，避免写入无效过期时间；用于黑名单写入等场景与 Access Token 的 `exp` 对齐。
+
 ---
 
 ## 🎯 设计原则

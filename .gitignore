@@ -10,6 +10,7 @@ keys/*.pem
 
 # IDE
 .idea/
+.trae/
 .vscode/
 *.swp
 *.swo

@@ -129,6 +129,24 @@ CREATE TABLE IF NOT EXISTS "token-blacklist" (
 );
 
 -- ========================================
+-- 用户Access Token缓存表 (user-access-cache)
+-- 记录近15分钟签发的Access Token用于按设备精准拉黑
+-- ========================================
+CREATE TABLE IF NOT EXISTS "user-access-cache" (
+    "jti" TEXT PRIMARY KEY,
+    "user-id" TEXT NOT NULL,
+    "device-id" TEXT NOT NULL,
+    "exp" TIMESTAMP NOT NULL,
+    "issued-at" TIMESTAMP NOT NULL,
+    "inserted-at" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "fk-access-cache-user"
+        FOREIGN KEY ("user-id")
+        REFERENCES "users"("user-id")
+        ON DELETE CASCADE
+);
+
+-- ========================================
 -- 创建索引 (提升查询性能)
 -- ========================================
 
@@ -154,6 +172,10 @@ CREATE INDEX IF NOT EXISTS "idx-refresh-tokens-revoked" ON "user-refresh-tokens"
 CREATE INDEX IF NOT EXISTS "idx-blacklist-user-id" ON "token-blacklist"("user-id");
 CREATE INDEX IF NOT EXISTS "idx-blacklist-expires" ON "token-blacklist"("expires-at");
 CREATE INDEX IF NOT EXISTS "idx-blacklist-type" ON "token-blacklist"("token-type");
+
+-- Access Token缓存表索引
+CREATE INDEX IF NOT EXISTS "idx-access-cache-user-device" ON "user-access-cache"("user-id", "device-id");
+CREATE INDEX IF NOT EXISTS "idx-access-cache-exp" ON "user-access-cache"("exp");
 
 -- ========================================
 -- 创建触发器 (自动更新 updated-at)
@@ -223,6 +245,7 @@ FROM "groups";
 \echo '  2. groups                 - 群聊数据表';
 \echo '  3. user-refresh-tokens    - 刷新Token管理表（多设备）';
 \echo '  4. token-blacklist        - Token黑名单表';
+\echo '  5. user-access-cache      - Access Token缓存表';
 \echo '';
 \echo '创建的索引:';
 \echo '  用户表:';
@@ -239,6 +262,8 @@ FROM "groups";
 \echo '    - idx-refresh-tokens-device';
 \echo '    - idx-blacklist-user-id';
 \echo '    - idx-blacklist-expires';
+\echo '    - idx-access-cache-user-device';
+\echo '    - idx-access-cache-exp';
 \echo '';
 \echo '创建的触发器:';
 \echo '  - trigger-update-users-timestamp';

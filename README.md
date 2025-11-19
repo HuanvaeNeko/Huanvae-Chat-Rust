@@ -1,5 +1,35 @@
 # HuanVae Chat - 用户认证系统
 
+## 安全机制概览
+
+- 认证中间件门控：`need-blacklist-check` + `blacklist-check-expires-at`
+  - 正常请求跳过黑名单查询（高性能）
+  - 安全事件（登出、删除设备）开启 15 分钟窗口，窗口内查询黑名单并拦截
+
+- 按设备拉黑（统一策略）
+  - 缓存表 `user-access-cache` 记录近 15 分钟签发的 Access Token（`jti/user-id/device-id/exp/issued-at`）
+  - 删除设备/登出：按 `device_id` 读取缓存，批量将命中的 `jti` 写入黑名单；缓存为空时对当前请求 `jti` 兜底拉黑
+
+- 时间戳转换
+  - 用 `chrono::DateTime::from_timestamp(exp, 0).map(|dt| dt.naive_utc())` 代替废弃的 `NaiveDateTime::from_timestamp_opt`
+  - 当 `exp` 非法时，回退 `Utc::now().naive_utc()`，确保黑名单过期时间有效
+
+- 端点与覆盖
+  - 认证：`/api/auth/register`、`/api/auth/login`、`/api/auth/refresh`（公开）；`/api/auth/logout`、`/api/auth/devices`、`DELETE /api/auth/devices/{id}`（受保护）
+  - 好友：`/api/friends/requests`、`/requests/approve`、`/requests/reject`、`/remove`（写，受保护）；`/requests/sent`、`/requests/pending`、`/`（读，受保护）
+
+## 终端测试流程
+
+1. 注册两个用户，避免重复：`u1_<timestamp>`、`u2_<timestamp>`
+2. 登录 `u1` 获取 `access_token` 和 `device_id`
+3. 使用 Token 发起好友请求到 `u2`
+4. 删除当前设备（远程登出）
+5. 使用旧 Token 再次发起好友请求（应 401）
+6. 重新登录 `u1` 获取新 Token
+7. 使用新 Token 再次发起好友请求（应 200）
+
+以上流程用于验证“按设备拉黑 + 门控窗口”的即时拦截行为。
+
 基于 Rust + Axum + PostgreSQL + JWT 的完整认证系统，支持多设备登录和智能黑名单管理。
 
 ## ✨ 功能特性
@@ -90,28 +120,23 @@ cargo run
 
 ### 1. 用户注册
 
-```bash
-curl -X POST http://localhost:8080/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "user123",
-    "nickname": "张三",
-    "email": "zhangsan@example.com",
-    "password": "password123"
-  }'
+```js
+await fetch('http://localhost:8080/api/auth/register', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ 'user-id': 'user123', nickname: '张三', email: 'zhangsan@example.com', password: 'password123' })
+});
 ```
 
 ### 2. 用户登录
 
-```bash
-curl -X POST http://localhost:8080/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "user123",
-    "password": "password123",
-    "device_info": "Chrome 120 on Windows 11",
-    "mac_address": "00:11:22:33:44:55"
-  }'
+```js
+const login = await fetch('http://localhost:8080/api/auth/login', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ 'user-id': 'user123', password: 'password123', device_info: 'Chrome 120 on Windows 11', mac_address: '00:11:22:33:44:55' })
+}).then(r => r.json());
+const token = login.access_token;
 ```
 
 响应：
@@ -126,26 +151,29 @@ curl -X POST http://localhost:8080/api/auth/login \
 
 ### 3. 刷新 Token
 
-```bash
-curl -X POST http://localhost:8080/api/auth/refresh \
-  -H "Content-Type: application/json" \
-  -d '{
-    "refresh_token": "eyJ..."
-  }'
+```js
+await fetch('http://localhost:8080/api/auth/refresh', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ refresh_token: login.refresh_token })
+}).then(r => r.json());
 ```
 
 ### 4. 查看设备列表
 
-```bash
-curl -X GET http://localhost:8080/api/auth/devices \
-  -H "Authorization: Bearer eyJ..."
+```js
+await fetch('http://localhost:8080/api/auth/devices', {
+  headers: { 'Authorization': `Bearer ${token}` }
+}).then(r => r.json());
 ```
 
 ### 5. 登出
 
-```bash
-curl -X POST http://localhost:8080/api/auth/logout \
-  -H "Authorization: Bearer eyJ..."
+```js
+await fetch('http://localhost:8080/api/auth/logout', {
+  method: 'POST',
+  headers: { 'Authorization': `Bearer ${token}` }
+});
 ```
 
 ## 🔐 认证流程

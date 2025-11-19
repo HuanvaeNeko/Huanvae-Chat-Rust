@@ -180,46 +180,57 @@ Handler 处理 (register/login/logout/etc.)
 
 ## 📝 使用示例
 
-### 注册新用户
-```bash
-curl -X POST http://localhost:8080/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "user123",
-    "nickname": "张三",
-    "email": "zhangsan@example.com",
-    "password": "SecurePass123"
-  }'
+### 注册新用户（Fetch）
+```js
+await fetch('http://localhost:8080/api/auth/register', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    'user-id': 'user123',
+    nickname: '张三',
+    email: 'zhangsan@example.com',
+    password: 'SecurePass123'
+  })
+});
 ```
 
-### 用户登录
-```bash
-curl -X POST http://localhost:8080/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "user123",
-    "password": "SecurePass123",
-    "device_info": "Chrome on Windows"
-  }'
+### 用户登录（Fetch）
+```js
+const login = await fetch('http://localhost:8080/api/auth/login', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    'user-id': 'user123',
+    password: 'SecurePass123',
+    device_info: 'Chrome on Windows',
+    mac_address: '00:11:22:33:44:55'
+  })
+}).then(r => r.json());
+const token = login.access_token;
 ```
 
-### 刷新 Token
-```bash
-curl -X POST http://localhost:8080/api/auth/refresh \
-  -H "Content-Type: application/json" \
-  -d '{"refresh_token": "eyJ..."}'
+### 刷新 Token（Fetch）
+```js
+await fetch('http://localhost:8080/api/auth/refresh', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ refresh_token: login.refresh_token })
+}).then(r => r.json());
 ```
 
-### 查看设备列表
-```bash
-curl -X GET http://localhost:8080/api/auth/devices \
-  -H "Authorization: Bearer <access_token>"
+### 查看设备列表（Fetch）
+```js
+await fetch('http://localhost:8080/api/auth/devices', {
+  headers: { 'Authorization': `Bearer ${token}` }
+}).then(r => r.json());
 ```
 
-### 登出
-```bash
-curl -X POST http://localhost:8080/api/auth/logout \
-  -H "Authorization: Bearer <access_token>"
+### 登出（Fetch）
+```js
+await fetch('http://localhost:8080/api/auth/logout', {
+  method: 'POST',
+  headers: { 'Authorization': `Bearer ${token}` }
+});
 ```
 
 ---

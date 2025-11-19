@@ -1,6 +1,6 @@
 use crate::auth::errors::AuthError;
 use crate::auth::middleware::AuthContext;
-use crate::friends::models::{ApproveFriendRequest, RejectFriendRequest, SubmitFriendRequest, SubmitFriendResponse};
+use crate::friends::models::{ApproveFriendRequest, RejectFriendRequest, SubmitFriendRequest, SubmitFriendResponse, RemoveFriendRequest};
 use crate::friends::services::{append_record, parse_records, serialize_records, set_status};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -202,6 +202,72 @@ pub async fn reject_request(
     Ok(())
 }
 
+pub async fn remove_friend(
+    state: &FriendsState,
+    auth: &AuthContext,
+    body: RemoveFriendRequest,
+) -> Result<(), AuthError> {
+    ensure_user_id_matches_token(&body.user_id, auth)?;
+
+    let (mut owner_owned,): (String,) = sqlx::query_as(
+        r#"SELECT "user-owned-friends" FROM "users" WHERE "user-id" = $1 FOR UPDATE"#,
+    )
+    .bind(&body.user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|_| AuthError::InvalidToken)?;
+
+    let (mut friend_owned,): (String,) = sqlx::query_as(
+        r#"SELECT "user-owned-friends" FROM "users" WHERE "user-id" = $1 FOR UPDATE"#,
+    )
+    .bind(&body.friend_user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|_| AuthError::InvalidToken)?;
+
+    let mut owner_recs = parse_records(&owner_owned);
+    let mut friend_recs = parse_records(&friend_owned);
+
+    for r in owner_recs.iter_mut() {
+        if r.get("friend-id").map(|v| v == &body.friend_user_id).unwrap_or(false) {
+            r.insert("status".into(), "ended".into());
+            r.insert("remove-time".into(), body.remove_time.clone());
+            if let Some(reason) = body.remove_reason.clone() {
+                r.insert("remove-reason".into(), reason);
+            }
+        }
+    }
+
+    for r in friend_recs.iter_mut() {
+        if r.get("friend-id").map(|v| v == &body.user_id).unwrap_or(false) {
+            r.insert("status".into(), "ended".into());
+            r.insert("remove-time".into(), body.remove_time.clone());
+            if let Some(reason) = body.remove_reason.clone() {
+                r.insert("remove-reason".into(), reason);
+            }
+        }
+    }
+
+    owner_owned = serialize_records(&owner_recs);
+    friend_owned = serialize_records(&friend_recs);
+
+    sqlx::query(r#"UPDATE "users" SET "user-owned-friends"=$1 WHERE "user-id"=$2"#)
+        .bind(&owner_owned)
+        .bind(&body.user_id)
+        .execute(&state.db)
+        .await
+        .map_err(|_| AuthError::InternalServerError)?;
+
+    sqlx::query(r#"UPDATE "users" SET "user-owned-friends"=$1 WHERE "user-id"=$2"#)
+        .bind(&friend_owned)
+        .bind(&body.friend_user_id)
+        .execute(&state.db)
+        .await
+        .map_err(|_| AuthError::InternalServerError)?;
+
+    Ok(())
+}
+
 async fn manual_approve(
     state: &FriendsState,
     approver_user_id: &str,
@@ -262,6 +328,7 @@ async fn manual_approve(
     let mut applicant_friend = std::collections::HashMap::new();
     applicant_friend.insert("friend-id".into(), approver_user_id.to_string());
     applicant_friend.insert("add-time".into(), chrono::Utc::now().to_rfc3339());
+    applicant_friend.insert("status".into(), "active".into());
     if let Some(reason) = approved_reason.clone() {
         applicant_friend.insert("approve-reason".into(), reason);
     }
@@ -270,6 +337,7 @@ async fn manual_approve(
     let mut approver_friend = std::collections::HashMap::new();
     approver_friend.insert("friend-id".into(), applicant_user_id.to_string());
     approver_friend.insert("add-time".into(), chrono::Utc::now().to_rfc3339());
+    approver_friend.insert("status".into(), "active".into());
     if let Some(reason) = approved_reason {
         approver_friend.insert("approve-reason".into(), reason);
     }

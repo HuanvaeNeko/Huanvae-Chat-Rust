@@ -27,3 +27,11 @@ pub struct RejectFriendRequest {
     pub applicant_user_id: String,
     pub reject_reason: Option<String>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct RemoveFriendRequest {
+    pub user_id: String,
+    pub friend_user_id: String,
+    pub remove_time: String,
+    pub remove_reason: Option<String>,
+}

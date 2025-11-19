@@ -19,7 +19,8 @@ src/friends/
 - `POST /api/friends/requests/reject` → 拒绝好友申请
 - `GET  /api/friends/requests/sent` → 查看本人发出的待处理申请
 - `GET  /api/friends/requests/pending` → 查看本人收到的待处理申请
-- `GET  /api/friends` → 查看本人已拥有好友
+- `GET  /api/friends` → 查看本人已拥有好友（仅返回 `status=active`）
+- `POST /api/friends/remove` → 删除好友（标记结束，不物理删除）
 
 所有上述路由均通过认证中间件，使用 `Extension<AuthContext>` 注入认证信息。
 
@@ -29,7 +30,7 @@ src/friends/
 
 - `users."user-sent-friend-requests"`：本用户发出的申请列表
 - `users."user-pending-friend-requests"`：本用户收到的待处理申请列表
-- `users."user-owned-friends"`：本用户已拥有的好友列表
+- `users."user-owned-friends"`：本用户已拥有的好友列表（含状态）
 
 记录采用“键值对逗号分隔；记录间分号分隔”的序列化协议，示例：
 
@@ -42,9 +43,12 @@ friend-id:u2,add-time:2025-01-02T12:00:00Z,approve-reason:同意备注;
 
 - 申请：`request-id`、`request-user-id`、`request-message`、`request-time`、`status`
 - 发出：`request-id`、`sent-to-user-id`、`sent-message`、`sent-time`、`status`
-- 好友：`friend-id`、`add-time`、`approve-reason`
+- 好友：`friend-id`、`add-time`、`approve-reason`、`status`
 
-`status` 取值：`open | approved | rejected`；被标记为非 open 的记录在列表查询时不再返回（视为“结束”）。
+`status` 取值：
+- 请求：`open | approved | rejected`
+- 好友：`active | ended`
+读取规则：好友列表仅返回 `status=active`；删除好友时将记录标记为 `status=ended`，并记录 `remove-time/remove-reason`。
 
 ## 🔄 业务流程
 
@@ -56,7 +60,24 @@ friend-id:u2,add-time:2025-01-02T12:00:00Z,approve-reason:同意备注;
 3. 拒绝申请
    - 标记双方相关记录为 `rejected`，可选记录拒绝原因
 4. 列表查询
-   - 仅返回 `status = open` 的 `sent/pending`；`owned` 返回全部好友条目
+   - 仅返回 `status=open` 的 `sent/pending`
+   - `owned` 仅返回 `status=active` 的好友条目
+
+## 🗑️ 删除好友
+
+- 路径：`POST /api/friends/remove`
+- 请求示例：
+```
+{
+  "user_id": "user-123",
+  "friend_user_id": "user-456",
+  "remove_time": "2025-11-19T03:00:00Z",
+  "remove_reason": "不常联系"
+}
+```
+- 认证：需 `Authorization: Bearer <token>`；处理器校验 `user_id` 与认证上下文一致
+- 行为：双向将 `user-owned-friends` 中匹配记录 `status=ended`，写入 `remove-time/remove-reason`
+- 幂等：重复调用不会产生额外副作用
 
 ## 🏗️ 设计原则
 

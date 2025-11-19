@@ -22,6 +22,7 @@ pub async fn list_owned_friends_handler(
 
     let items = parse_records(&friends_text)
         .into_iter()
+        .filter(|r| r.get("status").map(|s| s == "active").unwrap_or(false))
         .map(|r| FriendDto {
             friend_id: r.get("friend-id").cloned().unwrap_or_default(),
             friend_nickname: r.get("friend-nickname").cloned(),

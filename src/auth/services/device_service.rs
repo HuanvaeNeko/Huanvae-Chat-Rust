@@ -1,5 +1,6 @@
 use crate::auth::{errors::AuthError, models::Device};
 use sqlx::PgPool;
+use chrono::NaiveDateTime;
 
 /// 设备管理服务
 pub struct DeviceService {
@@ -91,6 +92,27 @@ impl DeviceService {
         .await?;
 
         Ok(result.rows_affected())
+    }
+
+    /// 查询指定用户与设备在缓存中的未过期 Access Token（用于按设备批量拉黑）
+    pub async fn list_cached_access_tokens(
+        &self,
+        user_id: &str,
+        device_id: &str,
+    ) -> Result<Vec<(String, NaiveDateTime)>, AuthError> {
+        let rows: Vec<(String, NaiveDateTime)> = sqlx::query_as(
+            r#"
+            SELECT "jti", "exp" FROM "user-access-cache"
+            WHERE "user-id" = $1 AND "device-id" = $2 AND "exp" > $3
+            "#,
+        )
+        .bind(user_id)
+        .bind(device_id)
+        .bind(chrono::Utc::now().naive_utc())
+        .fetch_all(&self.db)
+        .await?;
+
+        Ok(rows)
     }
 }
 

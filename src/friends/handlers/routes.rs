@@ -6,6 +6,7 @@ use crate::friends::handlers::reject_request::reject_friend_request_handler;
 use crate::friends::handlers::list_pending::ListState as PendingListState;
 use crate::friends::handlers::list_sent::ListState as SentListState;
 use crate::friends::handlers::list_owned::ListState as OwnedListState;
+use crate::friends::handlers::remove_friend::remove_friend_handler;
 use crate::friends::services::FriendsState;
 use crate::friends::handlers::list_pending::list_pending_requests_handler;
 use crate::friends::handlers::list_sent::list_sent_requests_handler;
@@ -20,6 +21,7 @@ pub fn create_friend_routes(
         .route("/requests", post(create_friend_request_handler))
         .route("/requests/approve", post(approve_friend_request_handler))
         .route("/requests/reject", post(reject_friend_request_handler))
+        .route("/remove", post(remove_friend_handler))
         .with_state(friends_state.clone())
         .layer(middleware::from_fn_with_state(auth_state.clone(), auth_guard));
 

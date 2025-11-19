@@ -43,6 +43,12 @@ function init() {
   $('btnListPending').onclick = listPendingRequests;
   $('btnListSent').onclick = listSentRequests;
   $('btnListFriends').onclick = listFriends;
+  $('btnRemoveFriendDirect').onclick = () => {
+    const id = $('remove_friend_id').value.trim();
+    const reason = $('remove_friend_reason').value.trim();
+    if (!id) { $('removeResFmt').textContent = '请输入好友ID'; return; }
+    removeFriend(id, reason);
+  };
 }
 
 async function register() {
@@ -276,7 +282,19 @@ function renderFriends(items) {
   for (const it of items) {
     const div = document.createElement('div');
     div.className = 'friend-item';
-    div.innerHTML = `<strong>${it.friend_id}</strong> <span class="muted">${it.add_time}</span><div class="muted">${it.approve_reason || ''}</div>`;
+    const left = document.createElement('div');
+    left.innerHTML = `<strong>${it.friend_id}</strong> <span class="muted">${it.add_time}</span><div class="muted">${it.approve_reason || ''}</div>`;
+    const actions = document.createElement('div');
+    const reasonInput = document.createElement('input');
+    reasonInput.placeholder = '删除原因（可选）';
+    reasonInput.className = 'inline-input';
+    const btn = document.createElement('button');
+    btn.textContent = '删除好友';
+    btn.onclick = () => removeFriend(it.friend_id, reasonInput.value.trim());
+    actions.appendChild(reasonInput);
+    actions.appendChild(btn);
+    div.appendChild(left);
+    div.appendChild(actions);
     root.appendChild(div);
   }
 }
@@ -303,6 +321,27 @@ async function submitFriendRequest() {
   const { ok, data } = await doJson(req, 'submitReqFmt');
   $('submitResFmt').textContent = pretty(data);
   if (ok) { listSentRequests(); listPendingRequests(); }
+}
+
+async function removeFriend(friendId, reason) {
+  if (!state.accessToken) { $('removeResFmt').textContent = '未登录'; return; }
+  const claims = claimsFromToken();
+  const body = {
+    user_id: claims.sub,
+    friend_user_id: friendId,
+    remove_time: nowISO(),
+  };
+  if (reason) body.remove_reason = reason;
+  const req = {
+    method: 'POST',
+    url: `${state.friendsBase}/remove`,
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.accessToken}` },
+    body,
+  };
+  showRequest('removeReqFmt', req);
+  const { ok, data } = await doJson(req, 'removeReqFmt');
+  $('removeResFmt').textContent = pretty(data);
+  if (ok) { listFriends(); }
 }
 
 // Friends: approve

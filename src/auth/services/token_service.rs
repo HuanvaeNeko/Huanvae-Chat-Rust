@@ -4,6 +4,8 @@ use crate::auth::{
     utils::{generate_device_id, generate_jti, KeyManager},
 };
 use chrono::{Duration, Utc};
+use tokio::time::sleep;
+use std::time::Duration as StdDuration;
 use jsonwebtoken::{encode, decode, Header, Validation, Algorithm};
 use sqlx::PgPool;
 
@@ -32,14 +34,13 @@ impl TokenService {
         let token_id = uuid::Uuid::new_v4().to_string();
         let now = Utc::now();
 
-        // 生成 Access Token (15分钟)
-        let access_token = self.generate_access_token(
+        let access_token = self.generate_access_token_and_cache(
             user_id,
             email,
             &device_id,
             device_info.as_deref().unwrap_or("Unknown"),
             mac_address.as_deref().unwrap_or("Unknown"),
-        )?;
+        ).await?;
 
         // 生成 Refresh Token (7天)
         let refresh_token = self.generate_refresh_token(user_id, &device_id, &token_id)?;
@@ -66,8 +67,7 @@ impl TokenService {
         })
     }
 
-    /// 生成 Access Token (15分钟)
-    fn generate_access_token(
+    pub async fn generate_access_token_and_cache(
         &self,
         user_id: &str,
         email: &str,
@@ -89,6 +89,8 @@ impl TokenService {
             iat: now.timestamp(),
         };
 
+        self.write_access_cache(&claims).await?;
+
         let token = encode(
             &Header::new(Algorithm::RS256),
             &claims,
@@ -96,6 +98,37 @@ impl TokenService {
         )?;
 
         Ok(token)
+    }
+
+    pub async fn write_access_cache(&self, claims: &AccessTokenClaims) -> Result<(), AuthError> {
+        for attempt in 0..2 {
+            let res = sqlx::query(
+                r#"
+                INSERT INTO "user-access-cache" ("jti", "user-id", "device-id", "exp", "issued-at")
+                VALUES ($1, $2, $3, to_timestamp($4), to_timestamp($5))
+                ON CONFLICT ("jti") DO NOTHING
+                "#,
+            )
+            .bind(&claims.jti)
+            .bind(&claims.sub)
+            .bind(&claims.device_id)
+            .bind(claims.exp)
+            .bind(claims.iat)
+            .execute(&self.db)
+            .await;
+
+            match res {
+                Ok(_) => return Ok(()),
+                Err(e) => {
+                    if matches!(e, sqlx::Error::PoolTimedOut) && attempt == 0 {
+                        sleep(StdDuration::from_millis(100)).await;
+                        continue;
+                    }
+                    return Err(AuthError::DatabaseError(e.to_string()));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// 生成 Refresh Token (7天)
@@ -200,14 +233,13 @@ impl TokenService {
         .fetch_one(&self.db)
         .await?;
 
-        // 生成新的 Access Token
-        let access_token = self.generate_access_token(
+        let access_token = self.generate_access_token_and_cache(
             &user.user_id,
             &user.user_email,
             &claims.device_id,
             db_token.device_info.as_deref().unwrap_or("Unknown"),
             "Unknown",
-        )?;
+        ).await?;
 
         Ok(access_token)
     }

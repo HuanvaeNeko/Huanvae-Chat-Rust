@@ -36,9 +36,17 @@ HTTP 请求处理器层，负责接收和响应好友相关的 HTTP 请求。
 
 ### `list_owned.rs`
 用途: 查询本人已拥有的好友列表。
-返回: 全量好友条目。
+返回: 仅返回 `status=active` 的好友条目（删除后的 `status=ended` 不再显示）。
 
 注意：路由为 `GET /api/friends`（无尾斜杠）。
+
+### `remove_friend.rs`
+用途: 处理删除好友请求（标记结束，不物理删除）。
+主要功能:
+- 双向将 `user-owned-friends` 中匹配的记录标记为 `status=ended`
+- 记录 `remove-time` 与可选 `remove-reason`
+路由: `POST /api/friends/remove`
+认证: 通过中间件 `auth_guard` 注入 `AuthContext`；请求体的 `user_id` 必须与认证用户匹配
 
 ## 🔄 调用流程
 
