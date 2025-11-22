@@ -124,7 +124,7 @@ cargo run
 await fetch('http://localhost:8080/api/auth/register', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ 'user-id': 'user123', nickname: '张三', email: 'zhangsan@example.com', password: 'password123' })
+  body: JSON.stringify({ 'user_id': 'user123', nickname: '张三', email: 'zhangsan@example.com', password: 'password123' })
 });
 ```
 
@@ -134,7 +134,7 @@ await fetch('http://localhost:8080/api/auth/register', {
 const login = await fetch('http://localhost:8080/api/auth/login', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ 'user-id': 'user123', password: 'password123', device_info: 'Chrome 120 on Windows 11', mac_address: '00:11:22:33:44:55' })
+  body: JSON.stringify({ 'user_id': 'user123', password: 'password123', device_info: 'Chrome 120 on Windows 11', mac_address: '00:11:22:33:44:55' })
 }).then(r => r.json());
 const token = login.access_token;
 ```
