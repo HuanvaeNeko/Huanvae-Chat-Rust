@@ -34,6 +34,7 @@
 
 ## ✨ 功能特性
 
+### 认证系统 (Auth)
 - ✅ **用户注册/登录** - 支持邮箱注册，密码 bcrypt 加密
 - ✅ **双 Token 机制** - Access Token (15分钟) + Refresh Token (7天)
 - ✅ **RSA 签名** - 使用 RSA 私钥签名，公钥验证
@@ -42,32 +43,54 @@
 - ✅ **智能黑名单** - 安全事件触发的临时黑名单检查（15分钟）
 - ✅ **Token 刷新** - 自动刷新 Access Token，无缝续签
 
+### 好友系统 (Friends)
+- ✅ **好友请求** - 发送、接受、拒绝好友申请
+- ✅ **好友列表** - 查看已有好友、待处理请求
+- ✅ **好友管理** - 删除好友（软删除）
+
+### 个人资料 (Profile)
+- ✅ **信息查询** - 获取完整个人信息（不含密码）
+- ✅ **信息更新** - 更新邮箱、个性签名
+- ✅ **密码修改** - 验证旧密码后修改
+- ✅ **头像上传** - 支持 jpg/png/gif/webp，最大 5MB
+
+### 对象存储 (Storage)
+- ✅ **MinIO 集成** - S3 兼容的对象存储
+- ✅ **头像存储** - 公开访问的用户头像
+- ✅ **文件验证** - 类型、大小验证
+- ⏳ **群文件存储** - 待实现
+- ⏳ **用户文件存储** - 待实现
+
 ## 📂 项目结构
 
 ```
-src/auth/
-├── errors.rs              # 错误类型定义
-├── models/                # 数据模型
-│   ├── user.rs            # 用户模型
-│   ├── claims.rs          # JWT Claims
-│   ├── refresh_token.rs   # Refresh Token 模型
-│   └── device.rs          # 设备信息模型
-├── utils/                 # 工具函数
-│   ├── crypto.rs          # RSA 密钥管理
-│   ├── password.rs        # 密码哈希
-│   └── validator.rs       # 输入验证
-├── services/              # 业务逻辑
-│   ├── token_service.rs   # Token 生成/验证/刷新
-│   ├── blacklist_service.rs # 黑名单管理
-│   └── device_service.rs  # 设备管理
-├── middleware/            # 中间件
-│   └── auth_guard.rs      # 鉴权中间件
-└── handlers/              # HTTP 请求处理
-    ├── register.rs        # 注册
-    ├── login.rs           # 登录
-    ├── refresh_token.rs   # 刷新 Token
-    ├── logout.rs          # 登出
-    └── revoke_device.rs   # 设备管理
+src/
+├── auth/                  # 认证模块
+│   ├── errors.rs          # 错误类型定义
+│   ├── models/            # 数据模型
+│   ├── utils/             # 工具函数（密钥、密码、验证）
+│   ├── services/          # 业务逻辑（Token、黑名单、设备）
+│   ├── middleware/        # 鉴权中间件
+│   └── handlers/          # HTTP 请求处理
+├── friends/               # 好友系统模块
+│   ├── models/            # 请求/响应模型
+│   ├── services/          # 业务逻辑（好友管理）
+│   └── handlers/          # HTTP 请求处理
+├── profile/               # 个人资料模块
+│   ├── models/            # 请求/响应模型
+│   ├── services/          # 业务逻辑（资料管理）
+│   └── handlers/          # HTTP 请求处理
+├── storage/               # 对象存储模块
+│   ├── client.rs          # S3/MinIO 客户端
+│   ├── config.rs          # 配置管理
+│   └── services/          # 业务服务（头像上传）
+├── main.rs                # 应用入口
+└── lib.rs                 # 库导出
+
+接口调取文档/
+├── auth/                  # 认证接口文档
+├── friends/               # 好友接口文档
+└── profile/               # 个人资料接口文档
 ```
 
 ## 🚀 快速开始
@@ -108,13 +131,34 @@ cargo run
 | POST | `/api/auth/login` | 用户登录 |
 | POST | `/api/auth/refresh` | 刷新 Token |
 
-### 需要认证的端点
+### 认证端点（需要 Token）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/api/auth/logout` | 用户登出 |
 | GET | `/api/auth/devices` | 查看所有登录设备 |
 | DELETE | `/api/auth/devices/:id` | 撤销指定设备 |
+
+### 好友端点（需要 Token）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/friends/requests` | 提交好友申请 |
+| POST | `/api/friends/requests/approve` | 同意好友申请 |
+| POST | `/api/friends/requests/reject` | 拒绝好友申请 |
+| GET | `/api/friends/requests/sent` | 查看已发送请求 |
+| GET | `/api/friends/requests/pending` | 查看待处理请求 |
+| GET | `/api/friends` | 查看已有好友 |
+| POST | `/api/friends/remove` | 删除好友 |
+
+### 个人资料端点（需要 Token）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/profile` | 获取个人信息 |
+| PUT | `/api/profile` | 更新邮箱/签名 |
+| PUT | `/api/profile/password` | 修改密码 |
+| POST | `/api/profile/avatar` | 上传头像 |
 
 ## 📖 使用示例
 
@@ -239,7 +283,7 @@ await fetch('http://localhost:8080/api/auth/logout', {
 | 依赖 | 版本 | 用途 |
 |------|------|------|
 | tokio | 1.48.0 | 异步运行时 |
-| axum | 0.8.7 | Web 框架 |
+| axum | 0.8.7 | Web 框架 + Multipart |
 | tower | 0.5.2 | 中间件基础设施 |
 | tower-http | 0.6.6 | HTTP 中间件 (CORS, Trace) |
 | sqlx | 0.8.6 | PostgreSQL 异步客户端 |
@@ -257,17 +301,36 @@ await fetch('http://localhost:8080/api/auth/logout', {
 | anyhow | 1.0.100 | 错误处理 |
 | thiserror | 2.0.17 | 自定义错误宏 |
 | validator | 0.20.0 | 数据验证 |
+| aws-sdk-s3 | 1.115.0 | S3/MinIO 客户端 |
+| aws-config | 1.8.11 | AWS SDK 配置 |
+| aws-credential-types | 1.2.10 | AWS 凭证类型 |
 
 ## 📝 环境变量
 
 创建 `.env` 文件：
 
 ```bash
+# 数据库
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/huanvae_chat
-JWT_PRIVATE_KEY_PATH=./keys/private_key.pem
-JWT_PUBLIC_KEY_PATH=./keys/public_key.pem
-APP_PORT=8080
-RUST_LOG=info,sqlx=warn
+
+# JWT 密钥
+JWT_PRIVATE_KEY_PATH=./keys/rsa_private.pem
+JWT_PUBLIC_KEY_PATH=./keys/rsa_public.pem
+
+# 服务器
+SERVER_HOST=0.0.0.0
+SERVER_PORT=3000
+
+# MinIO 对象存储
+MINIO_ENDPOINT=http://localhost:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin123
+MINIO_BUCKET_AVATARS=avatars
+MINIO_PUBLIC_URL=http://localhost:9000
+MINIO_REGION=us-east-1
+
+# 日志
+RUST_LOG=info,huanvae_chat=debug
 ```
 
 ## 🔧 开发

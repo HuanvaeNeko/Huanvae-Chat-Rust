@@ -559,6 +559,16 @@ WHERE "user-id" = $2
 
 **效果**: 该设备的 Refresh Token 立即失效
 
+**完整流程** (在 `revoke_device_handler` 中):
+1. **启用黑名单检查**: 调用 `enable_blacklist_check`（15分钟窗口）
+2. **拉黑 Access Token**: 从缓存中读取该设备的所有 Access Token 并加入黑名单
+3. **兜底处理**: 如果缓存为空且删除的是当前设备，手动拉黑当前 Token
+4. **撤销 Refresh Token**: 调用 `revoke_device` 将 Refresh Token 标记为已撤销
+
+**行为说明**:
+- ⚠️ **删除其他设备**: 只撤销目标设备的 Token，不影响其他设备
+- ⚠️ **删除当前设备**: 当前 Access Token 被加入黑名单，立即失效
+
 ---
 
 #### 3. **撤销所有其他设备** (`revoke_all_other_devices`)

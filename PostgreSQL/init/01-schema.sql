@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS "users" (
     "user-nickname" TEXT NOT NULL,
     "user-password" TEXT NOT NULL,
     "user-email" TEXT,
+    "user-signature" TEXT DEFAULT '',
+    "user-avatar-url" TEXT DEFAULT '',
     "admin" TEXT DEFAULT 'false',
     
     -- 好友关系字段
@@ -156,6 +158,7 @@ CREATE INDEX IF NOT EXISTS "idx-users-nickname" ON "users"("user-nickname");
 CREATE INDEX IF NOT EXISTS "idx-users-admin" ON "users"("admin");
 CREATE INDEX IF NOT EXISTS "idx-users-created-at" ON "users"("created-at" DESC);
 CREATE INDEX IF NOT EXISTS "idx-users-blacklist-check" ON "users"("need-blacklist-check") WHERE "need-blacklist-check" = true;
+CREATE INDEX IF NOT EXISTS "idx-users-avatar-url" ON "users"("user-avatar-url");
 
 -- 群聊表索引
 CREATE INDEX IF NOT EXISTS "idx-groups-name" ON "groups"("group-name");

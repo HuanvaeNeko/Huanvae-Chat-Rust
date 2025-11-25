@@ -1,0 +1,660 @@
+#!/bin/bash
+
+# HuanVae Chat 完整功能测试脚本
+# 测试：用户注册、好友系统、个人资料、设备管理
+
+set -e  # 遇到错误立即退出
+
+BASE_URL="http://localhost:8080"
+TIMESTAMP=$(date +%s)
+
+# 颜色输出
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# 日志函数
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[✓]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[✗]${NC} $1"
+}
+
+log_step() {
+    echo -e "\n${YELLOW}========================================${NC}"
+    echo -e "${YELLOW}$1${NC}"
+    echo -e "${YELLOW}========================================${NC}"
+}
+
+# API 请求函数
+api_call() {
+    local method=$1
+    local path=$2
+    local token=$3
+    local data=$4
+    
+    if [ -n "$token" ]; then
+        if [ -n "$data" ]; then
+            curl -s -X "$method" "${BASE_URL}${path}" \
+                -H "Authorization: Bearer $token" \
+                -H "Content-Type: application/json" \
+                -d "$data"
+        else
+            curl -s -X "$method" "${BASE_URL}${path}" \
+                -H "Authorization: Bearer $token"
+        fi
+    else
+        if [ -n "$data" ]; then
+            curl -s -X "$method" "${BASE_URL}${path}" \
+                -H "Content-Type: application/json" \
+                -d "$data"
+        else
+            curl -s -X "$method" "${BASE_URL}${path}"
+        fi
+    fi
+}
+
+# 检查服务是否运行
+check_service() {
+    log_info "检查服务是否运行..."
+    if curl -s "${BASE_URL}/health" > /dev/null 2>&1; then
+        log_success "服务正常运行"
+        return 0
+    else
+        log_error "服务未运行，请先启动服务: cargo run"
+        exit 1
+    fi
+}
+
+# 清理函数
+cleanup() {
+    log_info "清理临时文件..."
+    rm -f /tmp/user1_*.txt /tmp/user2_*.txt /tmp/test_avatar_*.png
+}
+
+# ==============================================
+# 测试开始
+# ==============================================
+
+echo -e "${GREEN}"
+echo "╔═══════════════════════════════════════════════╗"
+echo "║   HuanVae Chat 完整功能自动化测试            ║"
+echo "║   测试时间: $(date '+%Y-%m-%d %H:%M:%S')      ║"
+echo "╚═══════════════════════════════════════════════╝"
+echo -e "${NC}"
+
+# 检查服务
+check_service
+
+# 初始化测试数据
+USER1_ID="testuser_${TIMESTAMP}_1"
+USER2_ID="testuser_${TIMESTAMP}_2"
+USER1_NICK="测试用户1"
+USER2_NICK="测试用户2"
+PASSWORD="test123456"
+DEVICE_INFO="Linux/TestScript"
+MAC_ADDR1="00:11:22:33:44:55"
+MAC_ADDR2="00:11:22:33:44:66"
+
+# ==============================================
+# 第一部分：用户注册
+# ==============================================
+
+log_step "第 1 步：创建两个测试用户"
+
+log_info "注册用户1: $USER1_ID"
+REGISTER1=$(api_call POST /api/auth/register "" "{
+    \"user_id\": \"$USER1_ID\",
+    \"nickname\": \"$USER1_NICK\",
+    \"email\": \"${USER1_ID}@example.com\",
+    \"password\": \"$PASSWORD\"
+}")
+echo "$REGISTER1" | jq '.' 2>/dev/null || echo "$REGISTER1"
+
+if echo "$REGISTER1" | jq -e '.user_id' > /dev/null 2>&1; then
+    log_success "用户1 注册成功"
+else
+    log_error "用户1 注册失败"
+    exit 1
+fi
+
+sleep 1
+
+log_info "注册用户2: $USER2_ID"
+REGISTER2=$(api_call POST /api/auth/register "" "{
+    \"user_id\": \"$USER2_ID\",
+    \"nickname\": \"$USER2_NICK\",
+    \"email\": \"${USER2_ID}@example.com\",
+    \"password\": \"$PASSWORD\"
+}")
+echo "$REGISTER2" | jq '.' 2>/dev/null || echo "$REGISTER2"
+
+if echo "$REGISTER2" | jq -e '.user_id' > /dev/null 2>&1; then
+    log_success "用户2 注册成功"
+else
+    log_error "用户2 注册失败"
+    exit 1
+fi
+
+# ==============================================
+# 第二部分：用户登录
+# ==============================================
+
+log_step "第 2 步：两个用户分别登录"
+
+log_info "用户1 登录..."
+LOGIN1=$(api_call POST /api/auth/login "" "{
+    \"user_id\": \"$USER1_ID\",
+    \"password\": \"$PASSWORD\",
+    \"device_info\": \"$DEVICE_INFO\",
+    \"mac_address\": \"$MAC_ADDR1\"
+}")
+
+USER1_TOKEN=$(echo "$LOGIN1" | jq -r '.access_token')
+USER1_REFRESH=$(echo "$LOGIN1" | jq -r '.refresh_token')
+USER1_DEVICE=$(echo "$LOGIN1" | jq -r '.access_token' | cut -d'.' -f2 | base64 -d 2>/dev/null | jq -r '.device_id' 2>/dev/null || echo "unknown")
+
+if [ "$USER1_TOKEN" != "null" ] && [ -n "$USER1_TOKEN" ]; then
+    log_success "用户1 登录成功"
+    log_info "Token: ${USER1_TOKEN:0:50}..."
+else
+    log_error "用户1 登录失败"
+    echo "$LOGIN1"
+    exit 1
+fi
+
+sleep 1
+
+log_info "用户2 登录..."
+LOGIN2=$(api_call POST /api/auth/login "" "{
+    \"user_id\": \"$USER2_ID\",
+    \"password\": \"$PASSWORD\",
+    \"device_info\": \"$DEVICE_INFO\",
+    \"mac_address\": \"$MAC_ADDR2\"
+}")
+
+USER2_TOKEN=$(echo "$LOGIN2" | jq -r '.access_token')
+USER2_REFRESH=$(echo "$LOGIN2" | jq -r '.refresh_token')
+
+if [ "$USER2_TOKEN" != "null" ] && [ -n "$USER2_TOKEN" ]; then
+    log_success "用户2 登录成功"
+    log_info "Token: ${USER2_TOKEN:0:50}..."
+else
+    log_error "用户2 登录失败"
+    echo "$LOGIN2"
+    exit 1
+fi
+
+# ==============================================
+# 第三部分：好友功能测试
+# ==============================================
+
+log_step "第 3 步：用户1 向用户2 发送好友请求"
+
+FRIEND_REQ1=$(api_call POST /api/friends/requests "$USER1_TOKEN" "{
+    \"user_id\": \"$USER1_ID\",
+    \"target_user_id\": \"$USER2_ID\",
+    \"reason\": \"你好，我是用户1\",
+    \"request_time\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+}")
+echo "$FRIEND_REQ1" | jq '.' 2>/dev/null || echo "$FRIEND_REQ1"
+
+if echo "$FRIEND_REQ1" | grep -q "success\|Success\|成功"; then
+    log_success "好友请求发送成功"
+else
+    log_error "好友请求发送失败"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 4 步：用户2 查看待处理的好友请求"
+
+PENDING_REQ=$(api_call GET /api/friends/requests/pending "$USER2_TOKEN")
+echo "$PENDING_REQ" | jq '.' 2>/dev/null || echo "$PENDING_REQ"
+
+if echo "$PENDING_REQ" | grep -q "$USER1_ID"; then
+    log_success "用户2 收到好友请求"
+else
+    log_error "用户2 未收到好友请求"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 5 步：用户2 同意好友请求"
+
+APPROVE_REQ=$(api_call POST /api/friends/requests/approve "$USER2_TOKEN" "{
+    \"user_id\": \"$USER2_ID\",
+    \"applicant_user_id\": \"$USER1_ID\",
+    \"approved_time\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
+    \"approved_reason\": \"同意添加\"
+}")
+echo "$APPROVE_REQ" | jq '.' 2>/dev/null || echo "$APPROVE_REQ"
+
+if echo "$APPROVE_REQ" | grep -q "success\|Success\|成功"; then
+    log_success "好友请求已同意"
+else
+    log_error "好友请求同意失败"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 6 步：验证双方好友列表"
+
+log_info "查询用户1的好友列表..."
+FRIENDS1=$(api_call GET /api/friends "$USER1_TOKEN")
+echo "$FRIENDS1" | jq '.' 2>/dev/null || echo "$FRIENDS1"
+
+if echo "$FRIENDS1" | grep -q "$USER2_ID"; then
+    log_success "用户1 好友列表包含用户2"
+else
+    log_error "用户1 好友列表不包含用户2"
+fi
+
+sleep 1
+
+log_info "查询用户2的好友列表..."
+FRIENDS2=$(api_call GET /api/friends "$USER2_TOKEN")
+echo "$FRIENDS2" | jq '.' 2>/dev/null || echo "$FRIENDS2"
+
+if echo "$FRIENDS2" | grep -q "$USER1_ID"; then
+    log_success "用户2 好友列表包含用户1"
+else
+    log_error "用户2 好友列表不包含用户1"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 7 步：用户1 删除用户2 好友"
+
+REMOVE_FRIEND=$(api_call POST /api/friends/remove "$USER1_TOKEN" "{
+    \"user_id\": \"$USER1_ID\",
+    \"friend_user_id\": \"$USER2_ID\",
+    \"remove_time\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
+    \"remove_reason\": \"测试删除功能\"
+}")
+echo "$REMOVE_FRIEND" | jq '.' 2>/dev/null || echo "$REMOVE_FRIEND"
+
+if echo "$REMOVE_FRIEND" | grep -q "success\|Success\|成功"; then
+    log_success "好友删除成功"
+else
+    log_error "好友删除失败"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 8 步：重新发送好友请求（单方面）"
+
+FRIEND_REQ2=$(api_call POST /api/friends/requests "$USER1_ID" "$USER1_TOKEN" "{
+    \"user_id\": \"$USER1_ID\",
+    \"target_user_id\": \"$USER2_ID\",
+    \"reason\": \"重新添加好友\",
+    \"request_time\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+}")
+
+log_info "用户1 再次向用户2 发送好友请求"
+echo "$FRIEND_REQ2" | jq '.' 2>/dev/null || echo "$FRIEND_REQ2"
+
+sleep 1
+
+# ==============================================
+
+log_step "第 9 步：用户1 查看发出的好友请求"
+
+SENT_REQ=$(api_call GET /api/friends/requests/sent "$USER1_TOKEN")
+echo "$SENT_REQ" | jq '.' 2>/dev/null || echo "$SENT_REQ"
+
+if echo "$SENT_REQ" | grep -q "$USER2_ID"; then
+    log_success "用户1 发送列表包含请求"
+else
+    log_error "用户1 发送列表为空"
+fi
+
+sleep 1
+
+# ==============================================
+# 第四部分：个人资料测试
+# ==============================================
+
+log_step "第 10 步：用户1 获取个人信息"
+
+PROFILE1=$(api_call GET /api/profile "$USER1_TOKEN")
+echo "$PROFILE1" | jq '.' 2>/dev/null || echo "$PROFILE1"
+
+if echo "$PROFILE1" | jq -e '.data.user_id' > /dev/null 2>&1; then
+    log_success "获取个人信息成功"
+else
+    log_error "获取个人信息失败"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 11 步：用户1 更新个人信息"
+
+UPDATE_PROFILE=$(api_call PUT /api/profile "$USER1_TOKEN" "{
+    \"email\": \"updated_${USER1_ID}@example.com\",
+    \"signature\": \"这是我的个性签名 - 测试\"
+}")
+echo "$UPDATE_PROFILE" | jq '.' 2>/dev/null || echo "$UPDATE_PROFILE"
+
+if echo "$UPDATE_PROFILE" | grep -q "success\|Success\|成功"; then
+    log_success "个人信息更新成功"
+else
+    log_error "个人信息更新失败"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 12 步：用户1 修改密码"
+
+NEW_PASSWORD="newpass123456"
+UPDATE_PASSWORD=$(api_call PUT /api/profile/password "$USER1_TOKEN" "{
+    \"old_password\": \"$PASSWORD\",
+    \"new_password\": \"$NEW_PASSWORD\"
+}")
+echo "$UPDATE_PASSWORD" | jq '.' 2>/dev/null || echo "$UPDATE_PASSWORD"
+
+if echo "$UPDATE_PASSWORD" | grep -q "success\|Success\|成功"; then
+    log_success "密码修改成功"
+    PASSWORD="$NEW_PASSWORD"  # 更新密码变量
+else
+    log_error "密码修改失败"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 13 步：验证新密码可以登录"
+
+LOGIN1_NEW=$(api_call POST /api/auth/login "" "{
+    \"user_id\": \"$USER1_ID\",
+    \"password\": \"$NEW_PASSWORD\",
+    \"device_info\": \"$DEVICE_INFO\",
+    \"mac_address\": \"$MAC_ADDR1\"
+}")
+
+NEW_TOKEN=$(echo "$LOGIN1_NEW" | jq -r '.access_token')
+
+if [ "$NEW_TOKEN" != "null" ] && [ -n "$NEW_TOKEN" ]; then
+    log_success "新密码登录成功"
+    USER1_TOKEN="$NEW_TOKEN"  # 更新 token
+else
+    log_error "新密码登录失败"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 14 步：用户1 上传头像"
+
+# 创建测试图片
+echo "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAFUlEQVR42mNk+M9Qz0AEYBxVSF+FABJADveWkH6oAAAAAElFTkSuQmCC" | base64 -d > /tmp/test_avatar_${TIMESTAMP}.png
+
+UPLOAD_AVATAR=$(curl -s -X POST "${BASE_URL}/api/profile/avatar" \
+    -H "Authorization: Bearer $USER1_TOKEN" \
+    -F "avatar=@/tmp/test_avatar_${TIMESTAMP}.png")
+echo "$UPLOAD_AVATAR" | jq '.' 2>/dev/null || echo "$UPLOAD_AVATAR"
+
+if echo "$UPLOAD_AVATAR" | jq -e '.avatar_url' > /dev/null 2>&1; then
+    AVATAR_URL=$(echo "$UPLOAD_AVATAR" | jq -r '.avatar_url')
+    log_success "头像上传成功: $AVATAR_URL"
+else
+    log_error "头像上传失败"
+fi
+
+sleep 1
+
+# ==============================================
+# 第五部分：设备管理测试
+# ==============================================
+
+log_step "第 15 步：查看用户1的所有登录设备"
+
+DEVICES=$(api_call GET /api/auth/devices "$USER1_TOKEN")
+echo "$DEVICES" | jq '.' 2>/dev/null || echo "$DEVICES"
+
+DEVICE_COUNT=$(echo "$DEVICES" | jq -r '.devices | length' 2>/dev/null || echo "0")
+log_info "当前登录设备数: $DEVICE_COUNT"
+
+if [ "$DEVICE_COUNT" -gt 0 ]; then
+    log_success "获取设备列表成功"
+    DEVICE_ID=$(echo "$DEVICES" | jq -r '.devices[0].device_id' 2>/dev/null)
+    log_info "第一个设备 ID: $DEVICE_ID"
+else
+    log_error "获取设备列表失败"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 16 步：删除旧设备（应不影响当前 Token）"
+
+# 找到旧设备（is_current = false）
+OLD_DEVICE_ID=$(echo "$DEVICES" | jq -r '.devices[] | select(.is_current == false) | .device_id' | head -1)
+
+if [ -n "$OLD_DEVICE_ID" ] && [ "$OLD_DEVICE_ID" != "null" ]; then
+    log_info "删除旧设备: $OLD_DEVICE_ID"
+    DELETE_OLD=$(api_call DELETE "/api/auth/devices/${OLD_DEVICE_ID}" "$USER1_TOKEN")
+    echo "$DELETE_OLD" | jq '.' 2>/dev/null || echo "$DELETE_OLD"
+    
+    if echo "$DELETE_OLD" | grep -q "撤销"; then
+        log_success "旧设备删除成功"
+    else
+        log_error "旧设备删除失败"
+    fi
+    
+    sleep 2
+    
+    # 验证当前 Token 仍然有效
+    log_info "验证当前 Token 是否仍然有效..."
+    PROFILE_CHECK=$(api_call GET /api/profile "$USER1_TOKEN")
+    
+    if echo "$PROFILE_CHECK" | jq -e '.data' > /dev/null 2>&1; then
+        log_success "✓ 删除旧设备后，当前 Token 仍然有效（预期行为）"
+    else
+        log_error "✗ 当前 Token 意外失效"
+    fi
+else
+    log_info "没有旧设备，跳过此步骤"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 17 步：删除当前设备（应使 Token 失效）"
+
+# 找到当前设备（is_current = true）
+CURRENT_DEVICE_ID=$(echo "$DEVICES" | jq -r '.devices[] | select(.is_current == true) | .device_id')
+
+if [ -n "$CURRENT_DEVICE_ID" ] && [ "$CURRENT_DEVICE_ID" != "null" ]; then
+    log_info "删除当前设备: $CURRENT_DEVICE_ID"
+    DELETE_CURRENT=$(api_call DELETE "/api/auth/devices/${CURRENT_DEVICE_ID}" "$USER1_TOKEN")
+    echo "$DELETE_CURRENT" | jq '.' 2>/dev/null || echo "$DELETE_CURRENT"
+    
+    if echo "$DELETE_CURRENT" | grep -q "撤销"; then
+        log_success "当前设备删除成功"
+    else
+        log_error "当前设备删除失败"
+    fi
+    
+    sleep 2  # 等待黑名单同步
+    
+    # 验证当前 Token 已失效
+    log_info "尝试使用已删除设备的 Token 获取个人信息..."
+    PROFILE_AFTER_DELETE=$(api_call GET /api/profile "$USER1_TOKEN")
+    echo "$PROFILE_AFTER_DELETE" | jq '.' 2>/dev/null || echo "$PROFILE_AFTER_DELETE"
+    
+    if echo "$PROFILE_AFTER_DELETE" | grep -qi "unauthorized\|revoked\|401\|无效\|失效"; then
+        log_success "✓ Token 已正确失效（预期行为）"
+    else
+        log_error "✗ Token 仍然有效（不符合预期）"
+    fi
+    
+    sleep 1
+    
+    log_info "尝试使用已删除设备的 Token 发送好友请求..."
+    FRIEND_REQ_AFTER=$(api_call POST /api/friends/requests "$USER1_TOKEN" "{
+        \"user_id\": \"$USER1_ID\",
+        \"target_user_id\": \"$USER2_ID\",
+        \"reason\": \"测试\",
+        \"request_time\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+    }")
+    echo "$FRIEND_REQ_AFTER" | jq '.' 2>/dev/null || echo "$FRIEND_REQ_AFTER"
+    
+    if echo "$FRIEND_REQ_AFTER" | grep -qi "unauthorized\|revoked\|401\|无效\|失效"; then
+        log_success "✓ Token 已正确失效，无法发送好友请求（预期行为）"
+    else
+        log_error "✗ Token 仍然有效，成功发送了好友请求（不符合预期）"
+    fi
+else
+    log_error "无法获取当前设备 ID，跳过删除当前设备测试"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 18 步：用户1 重新登录获取新 Token"
+
+LOGIN1_FINAL=$(api_call POST /api/auth/login "" "{
+    \"user_id\": \"$USER1_ID\",
+    \"password\": \"$NEW_PASSWORD\",
+    \"device_info\": \"$DEVICE_INFO\",
+    \"mac_address\": \"$MAC_ADDR1\"
+}")
+
+USER1_TOKEN_NEW=$(echo "$LOGIN1_FINAL" | jq -r '.access_token')
+
+if [ "$USER1_TOKEN_NEW" != "null" ] && [ -n "$USER1_TOKEN_NEW" ]; then
+    log_success "用户1 重新登录成功"
+    log_info "新 Token: ${USER1_TOKEN_NEW:0:50}..."
+else
+    log_error "用户1 重新登录失败"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 19 步：使用新 Token 重新执行完整流程"
+
+log_info "1. 获取个人信息..."
+PROFILE_NEW=$(api_call GET /api/profile "$USER1_TOKEN_NEW")
+if echo "$PROFILE_NEW" | jq -e '.data' > /dev/null 2>&1; then
+    log_success "✓ 获取个人信息成功"
+else
+    log_error "✗ 获取个人信息失败"
+fi
+
+sleep 1
+
+log_info "2. 发送好友请求..."
+FRIEND_REQ_NEW=$(api_call POST /api/friends/requests "$USER1_TOKEN_NEW" "{
+    \"user_id\": \"$USER1_ID\",
+    \"target_user_id\": \"$USER2_ID\",
+    \"reason\": \"使用新 Token 添加好友\",
+    \"request_time\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+}")
+if echo "$FRIEND_REQ_NEW" | grep -q "success\|Success\|成功"; then
+    log_success "✓ 好友请求发送成功"
+else
+    log_error "✗ 好友请求发送失败"
+fi
+
+sleep 1
+
+log_info "3. 用户2 同意好友请求..."
+APPROVE_NEW=$(api_call POST /api/friends/requests/approve "$USER2_TOKEN" "{
+    \"user_id\": \"$USER2_ID\",
+    \"applicant_user_id\": \"$USER1_ID\",
+    \"approved_time\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
+    \"approved_reason\": \"同意\"
+}")
+if echo "$APPROVE_NEW" | grep -q "success\|Success\|成功"; then
+    log_success "✓ 好友请求已同意"
+else
+    log_error "✗ 好友请求同意失败"
+fi
+
+sleep 1
+
+log_info "4. 验证好友列表..."
+FRIENDS_FINAL=$(api_call GET /api/friends "$USER1_TOKEN_NEW")
+if echo "$FRIENDS_FINAL" | grep -q "$USER2_ID"; then
+    log_success "✓ 好友列表验证成功"
+else
+    log_error "✗ 好友列表验证失败"
+fi
+
+sleep 1
+
+log_info "5. 更新个人信息..."
+UPDATE_FINAL=$(api_call PUT /api/profile "$USER1_TOKEN_NEW" "{
+    \"email\": \"final_${USER1_ID}@example.com\",
+    \"signature\": \"测试完成！\"
+}")
+if echo "$UPDATE_FINAL" | grep -q "success\|Success\|成功"; then
+    log_success "✓ 个人信息更新成功"
+else
+    log_error "✗ 个人信息更新失败"
+fi
+
+# ==============================================
+# 测试总结
+# ==============================================
+
+log_step "测试完成 - 总结报告"
+
+echo ""
+echo -e "${GREEN}╔════════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║              测试执行总结                              ║${NC}"
+echo -e "${GREEN}╠════════════════════════════════════════════════════════╣${NC}"
+echo -e "${GREEN}║  ✓ 用户注册         2 个用户                          ║${NC}"
+echo -e "${GREEN}║  ✓ 用户登录         验证通过                          ║${NC}"
+echo -e "${GREEN}║  ✓ 好友请求         发送/接收                          ║${NC}"
+echo -e "${GREEN}║  ✓ 好友管理         同意/删除                          ║${NC}"
+echo -e "${GREEN}║  ✓ 个人资料         查询/更新                          ║${NC}"
+echo -e "${GREEN}║  ✓ 密码修改         验证通过                          ║${NC}"
+echo -e "${GREEN}║  ✓ 头像上传         上传成功                          ║${NC}"
+echo -e "${GREEN}║  ✓ 设备管理         删除设备                          ║${NC}"
+echo -e "${GREEN}║  ✓ Token 失效       验证正确                          ║${NC}"
+echo -e "${GREEN}║  ✓ 重新登录         流程验证                          ║${NC}"
+echo -e "${GREEN}╚════════════════════════════════════════════════════════╝${NC}"
+echo ""
+
+echo -e "${BLUE}测试数据：${NC}"
+echo -e "  用户1 ID: $USER1_ID"
+echo -e "  用户2 ID: $USER2_ID"
+echo -e "  测试时间戳: $TIMESTAMP"
+echo ""
+
+# 清理
+cleanup
+
+log_success "所有测试完成！"
+

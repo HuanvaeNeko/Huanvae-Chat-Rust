@@ -104,7 +104,9 @@ HTTP 请求处理器层，负责接收和响应 HTTP 请求。
 
 2. **`revoke_device_handler`**:
    - 远程撤销指定设备的访问权限
-   - 删除该设备的 Refresh Token
+   - 将该设备的 Access Token 加入黑名单
+   - 撤销该设备的 Refresh Token
+   - 启用黑名单检查（15分钟窗口）
 
 **调用时机**:
 - `GET /api/auth/devices` - 查看所有设备
@@ -113,10 +115,19 @@ HTTP 请求处理器层，负责接收和响应 HTTP 请求。
 
 **依赖**:
 - `services/device_service.rs` - 设备管理逻辑
+- `services/blacklist_service.rs` - 黑名单管理
 
 **返回**: 
 - GET: `DeviceListResponse` (设备列表)
 - DELETE: 成功消息
+
+**重要行为说明**:
+- ⚠️ **删除其他设备**: 不影响当前设备的 Token，当前 Token 仍然有效
+- ⚠️ **删除当前设备**: 当前 Token 立即失效，后续请求返回 401 Unauthorized
+- 📌 示例：
+  - 用户有设备 A 和设备 B
+  - 使用设备 B 的 Token 删除设备 A → 设备 B 的 Token **仍然有效**
+  - 使用设备 B 的 Token 删除设备 B → 设备 B 的 Token **立即失效**
 
 ---
 

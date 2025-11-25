@@ -18,6 +18,8 @@ use huanvae_chat::friends::{
     handlers::create_friend_routes,
     services::FriendsState,
 };
+use huanvae_chat::profile::handlers::routes::profile_routes;
+use huanvae_chat::storage::{S3Client, S3Config};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -41,6 +43,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let db = PgPool::connect(&database_url).await?;
     tracing::info!("✅ 数据库连接成功");
+
+    // 4a. 初始化 MinIO/S3 客户端
+    let s3_config = S3Config::from_env().expect("Failed to load MinIO configuration");
+    let s3_client = Arc::new(
+        S3Client::new(s3_config)
+            .await
+            .expect("Failed to initialize S3 client"),
+    );
+    tracing::info!("✅ MinIO 客户端初始化成功");
 
     // 4. 加载或生成 RSA 密钥对
     let private_key_path = std::env::var("JWT_PRIVATE_KEY_PATH")
@@ -116,6 +127,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 db.clone(),
             ),
         )
+        // 个人资料路由
+        .merge(profile_routes(db.clone(), s3_client.clone(), auth_state.clone()))
         // CORS 中间件
         .layer(
             tower_http::cors::CorsLayer::new()
@@ -147,6 +160,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("  GET  /api/friends/requests/sent    - 已发送请求列表");
     tracing::info!("  GET  /api/friends/requests/pending - 待处理请求列表");
     tracing::info!("  GET  /api/friends                  - 已拥有好友列表");
+    tracing::info!("  GET  /api/profile                  - 获取个人信息");
+    tracing::info!("  PUT  /api/profile                  - 更新个人信息");
+    tracing::info!("  PUT  /api/profile/password         - 修改密码");
+    tracing::info!("  POST /api/profile/avatar           - 上传头像");
 
     axum::serve(listener, app).await?;
 
