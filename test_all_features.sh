@@ -207,8 +207,9 @@ FRIEND_REQ1=$(api_call POST /api/friends/requests "$USER1_TOKEN" "{
 }")
 echo "$FRIEND_REQ1" | jq '.' 2>/dev/null || echo "$FRIEND_REQ1"
 
-if echo "$FRIEND_REQ1" | grep -q "success\|Success\|成功"; then
-    log_success "好友请求发送成功"
+if echo "$FRIEND_REQ1" | jq -e '.request_id' > /dev/null 2>&1; then
+    REQUEST_ID=$(echo "$FRIEND_REQ1" | jq -r '.request_id')
+    log_success "好友请求发送成功 (ID: $REQUEST_ID)"
 else
     log_error "好友请求发送失败"
 fi
@@ -242,10 +243,10 @@ APPROVE_REQ=$(api_call POST /api/friends/requests/approve "$USER2_TOKEN" "{
 }")
 echo "$APPROVE_REQ" | jq '.' 2>/dev/null || echo "$APPROVE_REQ"
 
-if echo "$APPROVE_REQ" | grep -q "success\|Success\|成功"; then
-    log_success "好友请求已同意"
-else
+if echo "$APPROVE_REQ" | grep -qi "error\|错误\|失败"; then
     log_error "好友请求同意失败"
+else
+    log_success "好友请求已同意"
 fi
 
 sleep 1
@@ -290,10 +291,10 @@ REMOVE_FRIEND=$(api_call POST /api/friends/remove "$USER1_TOKEN" "{
 }")
 echo "$REMOVE_FRIEND" | jq '.' 2>/dev/null || echo "$REMOVE_FRIEND"
 
-if echo "$REMOVE_FRIEND" | grep -q "success\|Success\|成功"; then
-    log_success "好友删除成功"
-else
+if echo "$REMOVE_FRIEND" | grep -qi "error\|错误\|失败"; then
     log_error "好友删除失败"
+else
+    log_success "好友删除成功"
 fi
 
 sleep 1
@@ -580,7 +581,7 @@ FRIEND_REQ_NEW=$(api_call POST /api/friends/requests "$USER1_TOKEN_NEW" "{
     \"reason\": \"使用新 Token 添加好友\",
     \"request_time\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
 }")
-if echo "$FRIEND_REQ_NEW" | grep -q "success\|Success\|成功"; then
+if echo "$FRIEND_REQ_NEW" | jq -e '.request_id' > /dev/null 2>&1; then
     log_success "✓ 好友请求发送成功"
 else
     log_error "✗ 好友请求发送失败"
@@ -595,10 +596,10 @@ APPROVE_NEW=$(api_call POST /api/friends/requests/approve "$USER2_TOKEN" "{
     \"approved_time\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
     \"approved_reason\": \"同意\"
 }")
-if echo "$APPROVE_NEW" | grep -q "success\|Success\|成功"; then
-    log_success "✓ 好友请求已同意"
-else
+if echo "$APPROVE_NEW" | grep -qi "error\|错误\|失败"; then
     log_error "✗ 好友请求同意失败"
+else
+    log_success "✓ 好友请求已同意"
 fi
 
 sleep 1

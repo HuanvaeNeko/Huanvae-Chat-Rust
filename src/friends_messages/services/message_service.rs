@@ -56,7 +56,7 @@ impl MessageService {
         let conversation_uuid = Self::generate_conversation_uuid(sender_id, receiver_id);
         let send_time = Utc::now();
 
-        // 3. 插入消息到数据库
+        // 3. 插入消息到数据库（使用 ON CONFLICT 处理UUID冲突）
         sqlx::query(
             r#"
             INSERT INTO "friend-messages" (
@@ -64,6 +64,7 @@ impl MessageService {
                 "message-content", "message-type", "file-url", "file-size", "send-time"
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ON CONFLICT ("message-uuid") DO NOTHING
             "#,
         )
         .bind(&message_uuid)
