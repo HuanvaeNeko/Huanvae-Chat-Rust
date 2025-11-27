@@ -1,0 +1,39 @@
+use axum::extract::{Query, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Json};
+use axum::Extension;
+
+use crate::auth::errors::AuthError;
+use crate::auth::middleware::AuthContext;
+use crate::friends_messages::models::{GetMessagesQuery, MessagesListResponse};
+use crate::friends_messages::services::MessageService;
+
+use super::state::MessagesState;
+
+/// 获取消息列表处理器
+pub async fn get_messages_handler(
+    State(state): State<MessagesState>,
+    Extension(auth): Extension<AuthContext>,
+    Query(query): Query<GetMessagesQuery>,
+) -> Result<impl IntoResponse, AuthError> {
+    // 1. 验证参数
+    if query.friend_id.is_empty() {
+        return Err(AuthError::BadRequest("friend_id 不能为空".to_string()));
+    }
+
+    // 2. 限制 limit 范围
+    let limit = query.limit.unwrap_or(50).min(500).max(1);
+
+    // 3. 调用服务查询消息
+    let message_service = MessageService::new(state.db.clone());
+    let (messages, has_more) = message_service
+        .get_messages(&auth.user_id, &query.friend_id, query.before_uuid, limit)
+        .await?;
+
+    // 4. 返回响应
+    Ok((
+        StatusCode::OK,
+        Json(MessagesListResponse { messages, has_more }),
+    ))
+}
+

@@ -4,6 +4,7 @@ const pretty = (obj) => JSON.stringify(obj, null, 2);
 const state = {
   apiBase: localStorage.getItem('apiBase') || 'http://localhost:8080/api/auth',
   friendsBase: localStorage.getItem('friendsApiBase') || 'http://localhost:8080/api/friends',
+  messagesBase: localStorage.getItem('messagesApiBase') || 'http://localhost:8080/api/messages',
   accessToken: localStorage.getItem('accessToken') || '',
   refreshToken: localStorage.getItem('refreshToken') || '',
 };
@@ -11,6 +12,7 @@ const state = {
 function init() {
   $('apiBase').value = state.apiBase;
   $('friendsApiBase').value = state.friendsBase;
+  $('messagesApiBase').value = state.messagesBase;
   renderLocalState();
   $('saveBase').onclick = () => {
     state.apiBase = $('apiBase').value.trim() || state.apiBase;
@@ -20,6 +22,11 @@ function init() {
   $('saveFriendsBase').onclick = () => {
     state.friendsBase = $('friendsApiBase').value.trim() || state.friendsBase;
     localStorage.setItem('friendsApiBase', state.friendsBase);
+    renderLocalState();
+  };
+  $('saveMessagesBase').onclick = () => {
+    state.messagesBase = $('messagesApiBase').value.trim() || state.messagesBase;
+    localStorage.setItem('messagesApiBase', state.messagesBase);
     renderLocalState();
   };
 
@@ -48,6 +55,20 @@ function init() {
     const reason = $('remove_friend_reason').value.trim();
     if (!id) { $('removeResFmt').textContent = '请输入好友ID'; return; }
     removeFriend(id, reason);
+  };
+
+  // Messages
+  $('btnSendMessage').onclick = sendMessage;
+  $('btnGetMessages').onclick = getMessages;
+  $('btnDeleteMessage').onclick = () => {
+    const uuid = $('delete_message_uuid').value.trim();
+    if (!uuid) { $('msgDeleteResFmt').textContent = '请输入消息UUID'; return; }
+    deleteMessage(uuid);
+  };
+  $('btnRecallMessage').onclick = () => {
+    const uuid = $('recall_message_uuid').value.trim();
+    if (!uuid) { $('msgRecallResFmt').textContent = '请输入消息UUID'; return; }
+    recallMessage(uuid);
   };
 }
 
@@ -445,9 +466,252 @@ function renderLocalState() {
   $('localState').textContent = pretty({
     apiBase: state.apiBase,
     friendsApiBase: state.friendsBase,
+    messagesApiBase: state.messagesBase,
     hasAccessToken: !!state.accessToken,
     hasRefreshToken: !!state.refreshToken,
   });
+}
+
+// ========================================
+// Messages API
+// ========================================
+
+// Send message
+async function sendMessage() {
+  if (!state.accessToken) { $('msgSendResFmt').textContent = '未登录'; return; }
+  
+  const body = {
+    receiver_id: $('msg_receiver_id').value.trim(),
+    message_content: $('msg_content').value.trim(),
+    message_type: $('msg_type').value || 'text',
+  };
+  
+  const fileUrl = $('msg_file_url').value.trim();
+  const fileSize = $('msg_file_size').value.trim();
+  if (fileUrl) body.file_url = fileUrl;
+  if (fileSize) body.file_size = parseInt(fileSize);
+
+  if (!body.receiver_id || !body.message_content) {
+    $('msgSendResFmt').textContent = '接收者ID和消息内容必填';
+    return;
+  }
+
+  const req = {
+    method: 'POST',
+    url: state.messagesBase,
+    headers: { 
+      'Content-Type': 'application/json', 
+      'Authorization': `Bearer ${state.accessToken}` 
+    },
+    body,
+  };
+  showRequest('msgSendReqFmt', req);
+  const { ok, data } = await doJson(req, 'msgSendReqFmt');
+  $('msgSendResFmt').textContent = pretty(data);
+  
+  // 发送成功后清空表单
+  if (ok) {
+    $('msg_content').value = '';
+    $('msg_file_url').value = '';
+    $('msg_file_size').value = '';
+    // 如果正在查看与该好友的消息，自动刷新
+    const currentFriendId = $('msg_friend_id').value.trim();
+    if (currentFriendId === body.receiver_id) {
+      setTimeout(() => getMessages(), 500);
+    }
+  }
+}
+
+// Get messages
+async function getMessages() {
+  if (!state.accessToken) { $('msgGetResFmt').textContent = '未登录'; return; }
+  
+  const friendId = $('msg_friend_id').value.trim();
+  const beforeUuid = $('msg_before_uuid').value.trim();
+  const limit = $('msg_limit').value.trim() || '50';
+
+  if (!friendId) {
+    $('msgGetResFmt').textContent = '好友ID必填';
+    return;
+  }
+
+  let url = `${state.messagesBase}?friend_id=${encodeURIComponent(friendId)}&limit=${limit}`;
+  if (beforeUuid) {
+    url += `&before_uuid=${encodeURIComponent(beforeUuid)}`;
+  }
+
+  const req = {
+    method: 'GET',
+    url,
+    headers: { 'Authorization': `Bearer ${state.accessToken}` },
+  };
+  showRequest('msgGetReqFmt', req);
+  const { ok, data } = await doJson(req, 'msgGetReqFmt');
+  $('msgGetResFmt').textContent = pretty(data);
+  
+  // 渲染消息列表
+  if (ok && Array.isArray(data.messages)) {
+    renderMessages(data.messages, data.has_more);
+  }
+}
+
+function renderMessages(messages, hasMore) {
+  const root = $('messagesList');
+  root.innerHTML = '';
+  
+  if (messages.length === 0) {
+    root.innerHTML = '<div class="muted">暂无消息</div>';
+    return;
+  }
+
+  const claims = claimsFromToken();
+  const currentUserId = claims.sub;
+
+  for (const msg of messages) {
+    const item = document.createElement('div');
+    item.className = 'message-item';
+    if (msg.sender_id === currentUserId) {
+      item.classList.add('sent');
+    } else {
+      item.classList.add('received');
+    }
+
+    const header = document.createElement('div');
+    header.className = 'message-header';
+    header.innerHTML = `
+      <strong>${msg.sender_id === currentUserId ? '我' : msg.sender_id}</strong>
+      <span class="muted">${new Date(msg.send_time).toLocaleString()}</span>
+    `;
+
+    const content = document.createElement('div');
+    content.className = 'message-content';
+    
+    if (msg.message_type === 'text') {
+      content.textContent = msg.message_content;
+    } else {
+      content.innerHTML = `
+        <div><strong>[${msg.message_type}]</strong> ${msg.message_content || ''}</div>
+        ${msg.file_url ? `<div class="muted">文件: ${msg.file_url}</div>` : ''}
+        ${msg.file_size ? `<div class="muted">大小: ${(msg.file_size / 1024).toFixed(2)} KB</div>` : ''}
+      `;
+    }
+
+    const footer = document.createElement('div');
+    footer.className = 'message-footer';
+    footer.innerHTML = `<span class="muted">UUID: ${msg.message_uuid}</span>`;
+
+    const actions = document.createElement('div');
+    actions.className = 'message-actions';
+    
+    // 删除按钮
+    const deleteBtn = document.createElement('button');
+    deleteBtn.textContent = '删除';
+    deleteBtn.className = 'small-btn';
+    deleteBtn.onclick = () => {
+      $('delete_message_uuid').value = msg.message_uuid;
+      deleteMessage(msg.message_uuid);
+    };
+    actions.appendChild(deleteBtn);
+
+    // 撤回按钮（只有发送者且2分钟内）
+    if (msg.sender_id === currentUserId) {
+      const sendTime = new Date(msg.send_time);
+      const now = new Date();
+      const diffMinutes = (now - sendTime) / 1000 / 60;
+      
+      if (diffMinutes <= 2) {
+        const recallBtn = document.createElement('button');
+        recallBtn.textContent = '撤回';
+        recallBtn.className = 'small-btn';
+        recallBtn.onclick = () => {
+          $('recall_message_uuid').value = msg.message_uuid;
+          recallMessage(msg.message_uuid);
+        };
+        actions.appendChild(recallBtn);
+      }
+    }
+
+    item.appendChild(header);
+    item.appendChild(content);
+    item.appendChild(footer);
+    item.appendChild(actions);
+    root.appendChild(item);
+  }
+
+  // 显示是否还有更多消息
+  if (hasMore) {
+    const moreDiv = document.createElement('div');
+    moreDiv.className = 'muted';
+    moreDiv.style.textAlign = 'center';
+    moreDiv.style.marginTop = '10px';
+    moreDiv.innerHTML = '还有更多消息...';
+    
+    const loadMoreBtn = document.createElement('button');
+    loadMoreBtn.textContent = '加载更多';
+    loadMoreBtn.onclick = () => {
+      const lastMsg = messages[messages.length - 1];
+      $('msg_before_uuid').value = lastMsg.message_uuid;
+      getMessages();
+    };
+    moreDiv.appendChild(loadMoreBtn);
+    root.appendChild(moreDiv);
+  }
+}
+
+// Delete message
+async function deleteMessage(uuid) {
+  if (!state.accessToken) { $('msgDeleteResFmt').textContent = '未登录'; return; }
+  if (!uuid) { $('msgDeleteResFmt').textContent = '消息UUID必填'; return; }
+
+  const req = {
+    method: 'DELETE',
+    url: `${state.messagesBase}/delete`,
+    headers: { 
+      'Content-Type': 'application/json', 
+      'Authorization': `Bearer ${state.accessToken}` 
+    },
+    body: { message_uuid: uuid },
+  };
+  showRequest('msgDeleteReqFmt', req);
+  const { ok, data } = await doJson(req, 'msgDeleteReqFmt');
+  $('msgDeleteResFmt').textContent = pretty(data);
+  
+  // 删除成功后刷新消息列表
+  if (ok) {
+    $('delete_message_uuid').value = '';
+    const friendId = $('msg_friend_id').value.trim();
+    if (friendId) {
+      setTimeout(() => getMessages(), 500);
+    }
+  }
+}
+
+// Recall message
+async function recallMessage(uuid) {
+  if (!state.accessToken) { $('msgRecallResFmt').textContent = '未登录'; return; }
+  if (!uuid) { $('msgRecallResFmt').textContent = '消息UUID必填'; return; }
+
+  const req = {
+    method: 'POST',
+    url: `${state.messagesBase}/recall`,
+    headers: { 
+      'Content-Type': 'application/json', 
+      'Authorization': `Bearer ${state.accessToken}` 
+    },
+    body: { message_uuid: uuid },
+  };
+  showRequest('msgRecallReqFmt', req);
+  const { ok, data } = await doJson(req, 'msgRecallReqFmt');
+  $('msgRecallResFmt').textContent = pretty(data);
+  
+  // 撤回成功后刷新消息列表
+  if (ok) {
+    $('recall_message_uuid').value = '';
+    const friendId = $('msg_friend_id').value.trim();
+    if (friendId) {
+      setTimeout(() => getMessages(), 500);
+    }
+  }
 }
 
 window.addEventListener('DOMContentLoaded', init);

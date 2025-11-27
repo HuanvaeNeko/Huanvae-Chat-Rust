@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod friends;
+pub mod friends_messages;
 pub mod profile;
 pub mod storage;
 

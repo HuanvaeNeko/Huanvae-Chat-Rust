@@ -625,6 +625,260 @@ else
 fi
 
 # ==============================================
+# 第六部分：好友消息功能测试
+# ==============================================
+
+log_step "第 20 步：用户1 向用户2 发送文本消息"
+
+log_info "发送第一条消息..."
+SEND_MSG1=$(api_call POST /api/messages "$USER1_TOKEN_NEW" "{
+    \"receiver_id\": \"$USER2_ID\",
+    \"message_content\": \"Hi, 这是第一条测试消息\",
+    \"message_type\": \"text\"
+}")
+echo "$SEND_MSG1" | jq '.' 2>/dev/null || echo "$SEND_MSG1"
+
+MSG1_UUID=$(echo "$SEND_MSG1" | jq -r '.message_uuid' 2>/dev/null)
+if [ "$MSG1_UUID" != "null" ] && [ -n "$MSG1_UUID" ]; then
+    log_success "消息发送成功: $MSG1_UUID"
+else
+    log_error "消息发送失败"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 21 步：用户2 回复消息"
+
+log_info "用户2 发送回复..."
+SEND_MSG2=$(api_call POST /api/messages "$USER2_TOKEN" "{
+    \"receiver_id\": \"$USER1_ID\",
+    \"message_content\": \"Hi, 收到你的消息了！\",
+    \"message_type\": \"text\"
+}")
+echo "$SEND_MSG2" | jq '.' 2>/dev/null || echo "$SEND_MSG2"
+
+MSG2_UUID=$(echo "$SEND_MSG2" | jq -r '.message_uuid' 2>/dev/null)
+if [ "$MSG2_UUID" != "null" ] && [ -n "$MSG2_UUID" ]; then
+    log_success "回复消息发送成功: $MSG2_UUID"
+else
+    log_error "回复消息发送失败"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 22 步：用户1 再发送两条消息"
+
+log_info "发送第三条消息..."
+SEND_MSG3=$(api_call POST /api/messages "$USER1_TOKEN_NEW" "{
+    \"receiver_id\": \"$USER2_ID\",
+    \"message_content\": \"这是第三条消息\",
+    \"message_type\": \"text\"
+}")
+MSG3_UUID=$(echo "$SEND_MSG3" | jq -r '.message_uuid' 2>/dev/null)
+log_info "消息UUID: $MSG3_UUID"
+
+sleep 1
+
+log_info "发送第四条消息..."
+SEND_MSG4=$(api_call POST /api/messages "$USER1_TOKEN_NEW" "{
+    \"receiver_id\": \"$USER2_ID\",
+    \"message_content\": \"这是第四条消息，稍后会被撤回\",
+    \"message_type\": \"text\"
+}")
+MSG4_UUID=$(echo "$SEND_MSG4" | jq -r '.message_uuid' 2>/dev/null)
+log_info "消息UUID: $MSG4_UUID"
+
+sleep 1
+
+# ==============================================
+
+log_step "第 23 步：用户2 查看与用户1 的消息列表"
+
+GET_MSGS=$(api_call GET "/api/messages?friend_id=$USER1_ID&limit=10" "$USER2_TOKEN")
+echo "$GET_MSGS" | jq '.' 2>/dev/null || echo "$GET_MSGS"
+
+MSG_COUNT=$(echo "$GET_MSGS" | jq -r '.messages | length' 2>/dev/null || echo "0")
+log_info "当前消息数量: $MSG_COUNT"
+
+if [ "$MSG_COUNT" -ge 3 ]; then
+    log_success "✓ 获取消息列表成功（至少3条消息）"
+else
+    log_error "✗ 获取消息列表失败或消息数量不足"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 24 步：用户1 查看与用户2 的消息列表"
+
+GET_MSGS_USER1=$(api_call GET "/api/messages?friend_id=$USER2_ID&limit=10" "$USER1_TOKEN_NEW")
+echo "$GET_MSGS_USER1" | jq '.' 2>/dev/null || echo "$GET_MSGS_USER1"
+
+MSG_COUNT_USER1=$(echo "$GET_MSGS_USER1" | jq -r '.messages | length' 2>/dev/null || echo "0")
+log_info "用户1 看到的消息数量: $MSG_COUNT_USER1"
+
+if [ "$MSG_COUNT_USER1" -ge 3 ]; then
+    log_success "✓ 双方都能看到消息"
+else
+    log_error "✗ 用户1 消息列表异常"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 25 步：用户1 删除第一条消息（软删除）"
+
+log_info "删除消息: $MSG1_UUID"
+DELETE_MSG=$(api_call DELETE /api/messages/delete "$USER1_TOKEN_NEW" "{
+    \"message_uuid\": \"$MSG1_UUID\"
+}")
+echo "$DELETE_MSG" | jq '.' 2>/dev/null || echo "$DELETE_MSG"
+
+if echo "$DELETE_MSG" | grep -q "success\|成功"; then
+    log_success "✓ 消息删除成功"
+else
+    log_error "✗ 消息删除失败"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 26 步：验证用户1 看不到已删除的消息"
+
+GET_MSGS_AFTER_DELETE=$(api_call GET "/api/messages?friend_id=$USER2_ID&limit=10" "$USER1_TOKEN_NEW")
+echo "$GET_MSGS_AFTER_DELETE" | jq '.' 2>/dev/null || echo "$GET_MSGS_AFTER_DELETE"
+
+MSG_COUNT_AFTER=$(echo "$GET_MSGS_AFTER_DELETE" | jq -r '.messages | length' 2>/dev/null || echo "0")
+log_info "删除后用户1 的消息数量: $MSG_COUNT_AFTER"
+
+if [ "$MSG_COUNT_AFTER" -lt "$MSG_COUNT_USER1" ]; then
+    log_success "✓ 用户1 已删除的消息不再显示"
+else
+    log_error "✗ 删除操作未生效"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 27 步：验证用户2 仍能看到被用户1 删除的消息"
+
+GET_MSGS_USER2_AFTER=$(api_call GET "/api/messages?friend_id=$USER1_ID&limit=10" "$USER2_TOKEN")
+echo "$GET_MSGS_USER2_AFTER" | jq '.' 2>/dev/null || echo "$GET_MSGS_USER2_AFTER"
+
+MSG_COUNT_USER2=$(echo "$GET_MSGS_USER2_AFTER" | jq -r '.messages | length' 2>/dev/null || echo "0")
+log_info "用户2 看到的消息数量: $MSG_COUNT_USER2"
+
+if [ "$MSG_COUNT_USER2" -eq "$MSG_COUNT" ]; then
+    log_success "✓ 用户2 仍能看到完整消息（双向独立删除）"
+else
+    log_error "✗ 用户2 的消息列表异常"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 28 步：用户1 撤回第四条消息（2分钟内）"
+
+log_info "撤回消息: $MSG4_UUID"
+RECALL_MSG=$(api_call POST /api/messages/recall "$USER1_TOKEN_NEW" "{
+    \"message_uuid\": \"$MSG4_UUID\"
+}")
+echo "$RECALL_MSG" | jq '.' 2>/dev/null || echo "$RECALL_MSG"
+
+if echo "$RECALL_MSG" | grep -q "success\|成功"; then
+    log_success "✓ 消息撤回成功"
+else
+    log_error "✗ 消息撤回失败"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 29 步：验证双方都看不到被撤回的消息"
+
+log_info "用户1 查看消息列表..."
+GET_MSGS_RECALL_U1=$(api_call GET "/api/messages?friend_id=$USER2_ID&limit=10" "$USER1_TOKEN_NEW")
+MSG_COUNT_RECALL_U1=$(echo "$GET_MSGS_RECALL_U1" | jq -r '.messages | length' 2>/dev/null || echo "0")
+log_info "撤回后用户1 的消息数量: $MSG_COUNT_RECALL_U1"
+
+sleep 1
+
+log_info "用户2 查看消息列表..."
+GET_MSGS_RECALL_U2=$(api_call GET "/api/messages?friend_id=$USER1_ID&limit=10" "$USER2_TOKEN")
+MSG_COUNT_RECALL_U2=$(echo "$GET_MSGS_RECALL_U2" | jq -r '.messages | length' 2>/dev/null || echo "0")
+log_info "撤回后用户2 的消息数量: $MSG_COUNT_RECALL_U2"
+
+if [ "$MSG_COUNT_RECALL_U1" -lt "$MSG_COUNT_AFTER" ] && [ "$MSG_COUNT_RECALL_U2" -lt "$MSG_COUNT_USER2" ]; then
+    log_success "✓ 撤回操作生效，双方都看不到被撤回的消息"
+else
+    log_error "✗ 撤回操作未完全生效"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 30 步：测试发送消息给非好友（应该失败）"
+
+log_info "尝试向不是好友的用户发送消息..."
+SEND_TO_STRANGER=$(api_call POST /api/messages "$USER1_TOKEN_NEW" "{
+    \"receiver_id\": \"nonexistent_user_999\",
+    \"message_content\": \"Hello stranger\",
+    \"message_type\": \"text\"
+}")
+echo "$SEND_TO_STRANGER" | jq '.' 2>/dev/null || echo "$SEND_TO_STRANGER"
+
+if echo "$SEND_TO_STRANGER" | grep -qi "error\|失败\|不是好友"; then
+    log_success "✓ 正确拒绝向非好友发送消息"
+else
+    log_error "✗ 系统允许向非好友发送消息（安全问题）"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 31 步：测试分页查询消息"
+
+log_info "查询前2条消息..."
+GET_MSGS_PAGE1=$(api_call GET "/api/messages?friend_id=$USER2_ID&limit=2" "$USER1_TOKEN_NEW")
+PAGE1_COUNT=$(echo "$GET_MSGS_PAGE1" | jq -r '.messages | length' 2>/dev/null || echo "0")
+HAS_MORE=$(echo "$GET_MSGS_PAGE1" | jq -r '.has_more' 2>/dev/null || echo "false")
+log_info "第一页消息数: $PAGE1_COUNT, 是否有更多: $HAS_MORE"
+
+if [ "$PAGE1_COUNT" -eq 2 ]; then
+    log_success "✓ 分页查询正常工作"
+    
+    # 获取最后一条消息的UUID用于下一页查询
+    LAST_MSG_UUID=$(echo "$GET_MSGS_PAGE1" | jq -r '.messages[-1].message_uuid' 2>/dev/null)
+    
+    if [ -n "$LAST_MSG_UUID" ] && [ "$LAST_MSG_UUID" != "null" ]; then
+        log_info "查询下一页消息（before_uuid: $LAST_MSG_UUID）..."
+        GET_MSGS_PAGE2=$(api_call GET "/api/messages?friend_id=$USER2_ID&before_uuid=$LAST_MSG_UUID&limit=2" "$USER1_TOKEN_NEW")
+        PAGE2_COUNT=$(echo "$GET_MSGS_PAGE2" | jq -r '.messages | length' 2>/dev/null || echo "0")
+        log_info "第二页消息数: $PAGE2_COUNT"
+        
+        if [ "$PAGE2_COUNT" -gt 0 ]; then
+            log_success "✓ 分页翻页功能正常"
+        else
+            log_info "没有更多消息（可能是正常情况）"
+        fi
+    fi
+else
+    log_error "✗ 分页查询结果不符合预期"
+fi
+
+# ==============================================
 # 测试总结
 # ==============================================
 
@@ -644,6 +898,11 @@ echo -e "${GREEN}║  ✓ 头像上传         上传成功                     
 echo -e "${GREEN}║  ✓ 设备管理         删除设备                          ║${NC}"
 echo -e "${GREEN}║  ✓ Token 失效       验证正确                          ║${NC}"
 echo -e "${GREEN}║  ✓ 重新登录         流程验证                          ║${NC}"
+echo -e "${GREEN}║  ✓ 消息发送         文本消息                          ║${NC}"
+echo -e "${GREEN}║  ✓ 消息查询         分页查询                          ║${NC}"
+echo -e "${GREEN}║  ✓ 消息删除         软删除                            ║${NC}"
+echo -e "${GREEN}║  ✓ 消息撤回         2分钟内                           ║${NC}"
+echo -e "${GREEN}║  ✓ 权限验证         非好友拒绝                        ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════════════════════╝${NC}"
 echo ""
 

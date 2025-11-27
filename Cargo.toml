@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 # Web 框架
 tokio = { version = "1.48.0", features = ["full"] }
-axum = { version = "0.8.7", features = ["macros", "multipart"] }
+axum = { version = "0.8.7", features = ["macros", "multipart", "ws"] }
 tower = { version = "0.5.2", features = ["util"] }
 tower-http = { version = "0.6.6", features = ["cors", "trace"] }
 
@@ -45,3 +45,8 @@ validator = { version = "0.20.0", features = ["derive"] }
 aws-sdk-s3 = "1.115.0"
 aws-config = "1.8.11"
 aws-credential-types = "1.2.10"
+
+# WebSocket 和并发
+tokio-tungstenite = "0.28.0"  # WebSocket 实现
+futures-util = "0.3.31"       # 异步流处理工具
+dashmap = "6.1.0"             # 高性能并发 HashMap (ConnectionManager)

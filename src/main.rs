@@ -18,6 +18,9 @@ use huanvae_chat::friends::{
     handlers::create_friend_routes,
     services::FriendsState,
 };
+use huanvae_chat::friends_messages::{
+    handlers::{create_messages_routes, MessagesState},
+};
 use huanvae_chat::profile::handlers::routes::profile_routes;
 use huanvae_chat::storage::{S3Client, S3Config};
 
@@ -98,6 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let friends_state = FriendsState::new(db.clone());
+    let messages_state = MessagesState::new(db.clone());
 
     // 7. 创建路由
     let app = Router::new()
@@ -126,6 +130,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 auth_state.clone(),
                 db.clone(),
             ),
+        )
+        // 好友消息路由
+        .nest(
+            "/api/messages",
+            create_messages_routes(messages_state, auth_state.clone()),
         )
         // 个人资料路由
         .merge(profile_routes(db.clone(), s3_client.clone(), auth_state.clone()))
@@ -164,6 +173,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("  PUT  /api/profile                  - 更新个人信息");
     tracing::info!("  PUT  /api/profile/password         - 修改密码");
     tracing::info!("  POST /api/profile/avatar           - 上传头像");
+    tracing::info!("  POST /api/messages                 - 发送消息");
+    tracing::info!("  GET  /api/messages                 - 获取消息列表");
+    tracing::info!("  DELETE /api/messages/delete        - 删除消息");
+    tracing::info!("  POST /api/messages/recall          - 撤回消息");
 
     axum::serve(listener, app).await?;
 

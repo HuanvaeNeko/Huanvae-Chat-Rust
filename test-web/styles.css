@@ -2,15 +2,25 @@
 body { font-family: system-ui, Arial, sans-serif; margin: 0; background: #f6f7f9; color: #222; }
 .container { max-width: 900px; margin: 24px auto; padding: 0 16px; }
 h1 { font-size: 24px; margin-bottom: 16px; }
+h3 { font-size: 18px; margin: 16px 0 8px 0; color: #333; }
 .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
-.row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
 label { width: 150px; color: #555; }
-input { flex: 1; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; }
+input, select, textarea { flex: 1; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-family: inherit; font-size: 14px; }
+textarea { resize: vertical; min-width: 200px; }
 button { padding: 8px 12px; border: 1px solid #2563eb; background: #2563eb; color: #fff; border-radius: 6px; cursor: pointer; }
 button:hover { background: #1d4ed8; }
-.result { background: #0b1021; color: #d1fae5; padding: 12px; border-radius: 6px; overflow: auto; max-height: 220px; }
+.small-btn { padding: 4px 8px; font-size: 12px; margin: 0 4px; }
+.result { background: #0b1021; color: #d1fae5; padding: 12px; border-radius: 6px; overflow: auto; max-height: 220px; font-size: 13px; }
 .device-item { display: flex; align-items: center; justify-content: space-between; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px; margin-bottom: 8px; }
 .muted { color: #666; font-size: 12px; }
 hr { border: none; border-top: 1px solid #e5e7eb; margin: 12px 0; }
 .friend-item { display: flex; align-items: center; justify-content: space-between; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px; margin-bottom: 8px; gap: 8px; }
 .inline-input { padding: 6px; border: 1px solid #d1d5db; border-radius: 6px; margin-right: 6px; }
+.message-item { padding: 12px; background: #f8f9fa; border-radius: 8px; margin-bottom: 8px; border-left: 3px solid #007bff; }
+.message-item.sent { border-left-color: #28a745; background: #e7f9e7; }
+.message-item.received { border-left-color: #007bff; background: #e7f3ff; }
+.message-header { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 14px; }
+.message-content { padding: 6px 0; font-size: 14px; }
+.message-footer { font-size: 11px; color: #888; margin-top: 6px; }
+.message-actions { margin-top: 6px; display: flex; gap: 4px; }

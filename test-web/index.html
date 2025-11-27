@@ -22,6 +22,11 @@
         <input id="friendsApiBase" type="text" placeholder="http://localhost:8080/api/friends" />
         <button id="saveFriendsBase">保存</button>
       </div>
+      <div class="row">
+        <label for="messagesApiBase">Messages API 基地址</label>
+        <input id="messagesApiBase" type="text" placeholder="http://localhost:8080/api/messages" />
+        <button id="saveMessagesBase">保存</button>
+      </div>
       <small>仅前端配置，未修改后端</small>
     </section>
 
@@ -120,6 +125,86 @@
       </div>
       <pre id="removeReqFmt" class="result"></pre>
       <pre id="removeResFmt" class="result"></pre>
+    </section>
+
+    <section class="card">
+      <h2>好友消息功能</h2>
+      
+      <h3>发送消息</h3>
+      <div class="row">
+        <label>接收者ID</label>
+        <input id="msg_receiver_id" type="text" placeholder="好友的用户ID" />
+      </div>
+      <div class="row">
+        <label>消息类型</label>
+        <select id="msg_type">
+          <option value="text">文本 (text)</option>
+          <option value="image">图片 (image)</option>
+          <option value="video">视频 (video)</option>
+          <option value="file">文件 (file)</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>消息内容</label>
+        <textarea id="msg_content" rows="3" placeholder="输入消息内容"></textarea>
+      </div>
+      <div class="row">
+        <label>文件URL（可选）</label>
+        <input id="msg_file_url" type="text" placeholder="仅媒体消息时填写" />
+      </div>
+      <div class="row">
+        <label>文件大小（字节，可选）</label>
+        <input id="msg_file_size" type="number" placeholder="1024000" />
+      </div>
+      <div class="row">
+        <button id="btnSendMessage">发送消息</button>
+      </div>
+      <pre id="msgSendReqFmt" class="result"></pre>
+      <pre id="msgSendResFmt" class="result"></pre>
+
+      <hr />
+
+      <h3>获取消息列表</h3>
+      <div class="row">
+        <label>好友ID</label>
+        <input id="msg_friend_id" type="text" placeholder="查看与该好友的消息" />
+      </div>
+      <div class="row">
+        <label>起始消息UUID（可选）</label>
+        <input id="msg_before_uuid" type="text" placeholder="分页查询，从此消息之前查询" />
+      </div>
+      <div class="row">
+        <label>查询数量</label>
+        <input id="msg_limit" type="number" value="50" placeholder="默认50，最大500" />
+      </div>
+      <div class="row">
+        <button id="btnGetMessages">获取消息列表</button>
+      </div>
+      <div id="messagesList" style="max-height: 500px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; margin: 10px 0;"></div>
+      <pre id="msgGetReqFmt" class="result"></pre>
+      <pre id="msgGetResFmt" class="result"></pre>
+
+      <hr />
+
+      <h3>删除消息</h3>
+      <div class="row">
+        <label>消息UUID</label>
+        <input id="delete_message_uuid" type="text" placeholder="要删除的消息UUID" />
+        <button id="btnDeleteMessage">删除消息（软删除）</button>
+      </div>
+      <pre id="msgDeleteReqFmt" class="result"></pre>
+      <pre id="msgDeleteResFmt" class="result"></pre>
+
+      <hr />
+
+      <h3>撤回消息</h3>
+      <div class="row">
+        <label>消息UUID</label>
+        <input id="recall_message_uuid" type="text" placeholder="要撤回的消息UUID（2分钟内）" />
+        <button id="btnRecallMessage">撤回消息</button>
+      </div>
+      <pre id="msgRecallReqFmt" class="result"></pre>
+      <pre id="msgRecallResFmt" class="result"></pre>
     </section>
 
     <section class="card">
