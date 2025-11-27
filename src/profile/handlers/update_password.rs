@@ -1,7 +1,6 @@
 use crate::auth::middleware::AuthContext;
 use crate::profile::handlers::routes::ProfileAppState;
 use crate::profile::models::UpdatePasswordRequest;
-use crate::profile::services::ProfileService;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Extension, Json};
 use serde_json::json;
 use tracing::error;
@@ -23,7 +22,7 @@ pub async fn update_password(
         );
     }
 
-    match ProfileService::update_password(&state.pool, user_id, request).await {
+    match state.profile_service.update_password(user_id, request).await {
         Ok(_) => (
             StatusCode::OK,
             Json(json!({ "message": "Password updated successfully" })),

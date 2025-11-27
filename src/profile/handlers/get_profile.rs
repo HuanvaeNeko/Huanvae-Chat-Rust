@@ -1,6 +1,5 @@
 use crate::auth::middleware::AuthContext;
 use crate::profile::handlers::routes::ProfileAppState;
-use crate::profile::services::ProfileService;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Extension, Json};
 use serde_json::json;
 use tracing::error;
@@ -12,7 +11,7 @@ pub async fn get_profile(
 ) -> impl IntoResponse {
     let user_id = &auth_ctx.user_id;
 
-    match ProfileService::get_profile(&state.pool, user_id).await {
+    match state.profile_service.get_profile(user_id).await {
         Ok(profile) => (StatusCode::OK, Json(json!({ "data": profile }))),
         Err(e) => {
             error!("Failed to get profile: {}", e);

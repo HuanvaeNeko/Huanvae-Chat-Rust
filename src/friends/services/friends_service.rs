@@ -5,13 +5,16 @@ use crate::friends::services::{append_record, parse_records, serialize_records, 
 use sqlx::PgPool;
 use uuid::Uuid;
 
+/// 好友服务
 #[derive(Clone)]
 pub struct FriendsState {
     pub db: PgPool,
 }
 
 impl FriendsState {
-    pub fn new(db: PgPool) -> Self { Self { db } }
+    pub fn new(db: PgPool) -> Self {
+        Self { db }
+    }
 }
 
 fn ensure_user_id_matches_token(req_user_id: &str, auth: &AuthContext) -> Result<(), AuthError> {

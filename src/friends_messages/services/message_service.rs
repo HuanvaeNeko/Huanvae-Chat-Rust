@@ -5,6 +5,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 /// 消息服务
+#[derive(Clone)]
 pub struct MessageService {
     db: PgPool,
 }

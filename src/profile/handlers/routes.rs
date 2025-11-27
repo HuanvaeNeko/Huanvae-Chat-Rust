@@ -1,4 +1,5 @@
 use crate::auth::middleware::{auth_guard, AuthState};
+use crate::profile::services::ProfileService;
 use crate::storage::S3Client;
 use axum::{
     middleware,
@@ -13,14 +14,14 @@ use super::{get_profile, update_password, update_profile, upload_avatar};
 /// Profile 模块的应用状态
 #[derive(Clone)]
 pub struct ProfileAppState {
-    pub pool: PgPool,
+    pub profile_service: ProfileService,
     pub s3_client: Arc<S3Client>,
 }
 
 /// 配置 profile 路由
 pub fn profile_routes(pool: PgPool, s3_client: Arc<S3Client>, auth_state: AuthState) -> Router {
     let state = ProfileAppState {
-        pool,
+        profile_service: ProfileService::new(pool),
         s3_client,
     };
 

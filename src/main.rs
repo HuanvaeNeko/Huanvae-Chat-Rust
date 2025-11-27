@@ -1,6 +1,5 @@
 use axum::{routing::get, Router};
 use dotenvy::dotenv;
-use sqlx::PgPool;
 use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -40,11 +39,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("🚀 HuanVae Chat 启动中...");
 
-    // 3. 连接数据库
+    // 3. 连接数据库（使用默认连接池配置）
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost:5432/huanvae_chat".to_string());
 
-    let db = PgPool::connect(&database_url).await?;
+    let db = sqlx::postgres::PgPoolOptions::new()
+        .connect(&database_url)
+        .await?;
     tracing::info!("✅ 数据库连接成功");
 
     // 4a. 初始化 MinIO/S3 客户端

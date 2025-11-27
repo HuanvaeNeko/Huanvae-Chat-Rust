@@ -4,14 +4,23 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use sqlx::PgPool;
 use tracing::{error, info};
 
-pub struct ProfileService;
+/// 用户资料服务
+#[derive(Clone)]
+pub struct ProfileService {
+    db: PgPool,
+}
 
 impl ProfileService {
+    pub fn new(db: PgPool) -> Self {
+        Self { db }
+    }
+
     /// 获取用户完整信息（不含密码）
     pub async fn get_profile(
-        pool: &PgPool,
+        &self,
         user_id: &str,
     ) -> Result<ProfileResponse, anyhow::Error> {
+        let pool = &self.db;
         let record: (String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<NaiveDateTime>, Option<NaiveDateTime>) = sqlx::query_as(
             r#"
             SELECT 
@@ -49,10 +58,11 @@ impl ProfileService {
 
     /// 更新个人信息（邮箱、签名）
     pub async fn update_profile(
-        pool: &PgPool,
+        &self,
         user_id: &str,
         request: UpdateProfileRequest,
     ) -> Result<(), anyhow::Error> {
+        let pool = &self.db;
         // 动态构建更新语句
         let mut updates = Vec::new();
         let mut args_count = 1;
@@ -100,10 +110,11 @@ impl ProfileService {
 
     /// 更新密码
     pub async fn update_password(
-        pool: &PgPool,
+        &self,
         user_id: &str,
         request: UpdatePasswordRequest,
     ) -> Result<(), anyhow::Error> {
+        let pool = &self.db;
         // 获取当前密码哈希
         let (current_hash,): (Option<String>,) = sqlx::query_as(
             r#"SELECT "user-password" FROM "users" WHERE "user-id" = $1"#
@@ -145,10 +156,11 @@ impl ProfileService {
 
     /// 更新头像 URL
     pub async fn update_avatar_url(
-        pool: &PgPool,
+        &self,
         user_id: &str,
         avatar_url: &str,
     ) -> Result<(), anyhow::Error> {
+        let pool = &self.db;
         sqlx::query(
             r#"UPDATE "users" SET "user-avatar-url" = $1 WHERE "user-id" = $2"#
         )

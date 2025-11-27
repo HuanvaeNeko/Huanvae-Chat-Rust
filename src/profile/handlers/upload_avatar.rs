@@ -1,7 +1,6 @@
 use crate::auth::middleware::AuthContext;
 use crate::profile::handlers::routes::ProfileAppState;
 use crate::profile::models::AvatarUploadResponse;
-use crate::profile::services::ProfileService;
 use crate::storage::services::AvatarService;
 use axum::{
     extract::{Multipart, State},
@@ -64,7 +63,7 @@ pub async fn upload_avatar(
     match AvatarService::upload_avatar(&state.s3_client, user_id, data, &fname).await {
         Ok(avatar_url) => {
             // 更新数据库
-            match ProfileService::update_avatar_url(&state.pool, user_id, &avatar_url).await {
+            match state.profile_service.update_avatar_url(user_id, &avatar_url).await {
                 Ok(_) => {
                     let response = AvatarUploadResponse {
                         avatar_url: avatar_url.clone(),
