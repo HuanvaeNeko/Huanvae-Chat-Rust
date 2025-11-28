@@ -46,37 +46,12 @@ fi
 
 # 生成配置文件
 echo "🔧 生成 Cargo 镜像配置..."
-cat > "$CONFIG_FILE" <<EOF
-# Rust Cargo 镜像配置
-# 自动生成时间: $(date '+%Y-%m-%d %H:%M:%S')
-# 镜像站: 清华大学开源软件镜像站
-# 参考: https://mirrors.tuna.tsinghua.edu.cn/
-
-# 使用清华镜像源替代 crates.io
+cat > "$CONFIG_FILE" << EOF | tee -a ${CARGO_HOME:-$HOME/.cargo}/config.toml
 [source.crates-io]
-replace-with = 'tuna'
+replace-with = 'mirror'
 
-# 清华大学 crates.io 镜像（稀疏索引）
-[source.tuna]
-registry = "$CRATES_MIRROR"
-
-# 注册表协议（推荐使用 sparse 协议以提高性能）
-[registries.crates-io]
-protocol = "sparse"
-
-# 网络配置
-[net]
-git-fetch-with-cli = false
-
-# HTTP 配置
-[http]
-check-revoke = false
-multiplexing = true
-
-# 构建配置
-[build]
-# 并行构建数量（根据 CPU 核心数自动调整）
-jobs = $(nproc 2>/dev/null || echo 4)
+[source.mirror]
+registry = "https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git"
 EOF
 
 echo "✅ Cargo 配置完成！"
