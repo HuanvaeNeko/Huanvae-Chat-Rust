@@ -186,6 +186,22 @@ impl S3Client {
         Ok(())
     }
 
+    /// 读取文件内容
+    pub async fn get_file(&self, bucket: &str, key: &str) -> Result<Vec<u8>, anyhow::Error> {
+        let response = self.client
+            .get_object()
+            .bucket(bucket)
+            .key(key)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to get file: {}", e))?;
+
+        let data = response.body.collect().await
+            .map_err(|e| anyhow::anyhow!("Failed to read file body: {}", e))?;
+
+        Ok(data.to_vec())
+    }
+
     /// 获取配置
     pub fn config(&self) -> &S3Config {
         &self.config

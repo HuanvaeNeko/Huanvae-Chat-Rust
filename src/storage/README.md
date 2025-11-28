@@ -81,9 +81,11 @@ MAX_CONCURRENT_UPLOADS=5              # 最大并发上传数
 #### **工作流程**
 
 ```
-1. 客户端计算文件SHA-256哈希
+1. 客户端计算文件采样SHA-256哈希
+   - 小文件（< 30MB）：完整哈希
+   - 大文件（≥ 30MB）：采样哈希（元信息 + 开头/中间/结尾各10MB）
 2. 请求上传 → POST /api/storage/upload/request
-   ├─ 秒传检查（哈希去重）
+   ├─ 秒传检查（采样哈希去重）
    ├─ 权限验证
    ├─ 文件类型和大小验证
    └─ 生成上传凭证（Token或预签名URL）
@@ -91,20 +93,54 @@ MAX_CONCURRENT_UPLOADS=5              # 最大并发上传数
 4. 上传完成通知（Token自动验证和消费）
 ```
 
-### 2. 秒传功能（哈希去重）
+### 2. 秒传功能（UUID映射 + 权限表 + 采样哈希）
 
-- 客户端计算文件SHA-256哈希
-- 服务端检查数据库中是否已存在相同哈希的文件
-- 如果存在且MinIO中文件可用，直接返回已有文件URL
-- 支持`force_upload=true`强制重新上传
+**核心机制**：
+- 客户端计算文件采样SHA-256哈希（小文件完整哈希，大文件采样哈希）
+- 服务端查询`file_uuid_mapping`表，检查是否存在相同哈希
+- **首次上传**：
+  - 上传文件到用户专属目录
+  - 生成唯一UUID作为访问标识
+  - 创建UUID映射记录
+  - 授予上传者`owner`权限
+- **秒传（不同用户上传相同文件）**：
+  - 查询到已存在的UUID映射（采样哈希匹配）
+  - 为当前用户创建独立的file_records记录
+  - 授予当前用户访问权限
+  - 返回相同的UUID访问URL
+  - **无需重复上传物理文件**
+
+**采样哈希说明**：
+- 小文件（< 30MB）：计算完整SHA-256哈希
+- 大文件（≥ 30MB）：采样策略
+  - 文件元信息（文件名 + 大小 + 修改时间 + MIME类型）
+  - 开头10MB数据
+  - 中间10MB数据
+  - 结尾10MB数据
+  - 合并计算SHA-256哈希
+- **优势**：避免浏览器内存溢出，3GB视频也能快速计算哈希并实现秒传
+- **唯一性**：元信息+三个采样点足以唯一识别文件，误判概率极低
+
+**UUID映射机制优势**：
+- ✅ **真正的跨用户去重**：相同文件只存储一份物理副本
+- ✅ **统一的访问控制**：基于UUID和权限表，不依赖MinIO策略
+- ✅ **灵活的权限管理**：支持软删除（revoked_at）
+- ✅ **用户隔离**：每个用户有独立的file_key，但共享物理文件
+- ✅ **秒传体验**：仅需数据库操作即可完成（< 10ms）
+
+**访问URL格式**：
+```
+旧格式（不推荐）: http://localhost:9000/user-file/{user_id}/images/xxx.jpg
+新格式（UUID）  : http://localhost:8080/api/storage/file/{uuid}
+```
 
 ### 3. 一次性Token上传（< 15GB）
 
 ```javascript
 // 前端示例
 const uploadFile = async (file) => {
-  // 1. 计算哈希
-  const fileHash = await calculateSHA256(file);
+  // 1. 计算采样哈希
+  const fileHash = await calculateSamplingHashSHA256(file);
   
   // 2. 请求上传
   const response = await fetch('/api/storage/upload/request', {
@@ -198,7 +234,11 @@ const uploadLargeFile = async (file) => {
 }
 ```
 
-**Response:**
+**说明**：
+- `file_hash`: 采样SHA-256哈希（小文件完整哈希，大文件采样哈希）
+- `estimated_upload_time`: 仅超大文件（> 15GB）需要提供
+
+**Response (首次上传):**
 ```json
 {
   "mode": "one_time_token",
@@ -213,6 +253,21 @@ const uploadLargeFile = async (file) => {
 }
 ```
 
+**Response (秒传):**
+```json
+{
+  "mode": "one_time_token",
+  "preview_support": "inline_preview",
+  "upload_token": null,
+  "upload_url": null,
+  "expires_in": null,
+  "file_key": "user_id/images/timestamp_hash_filename.jpg",
+  "max_file_size": 0,
+  "instant_upload": true,
+  "existing_file_url": "http://localhost:8080/api/storage/file/{uuid}"
+}
+```
+
 ### POST /api/storage/upload/direct?token={token}
 
 直接上传文件（Token验证，无需access_token）
@@ -223,13 +278,25 @@ const uploadLargeFile = async (file) => {
 **Response:**
 ```json
 {
-  "file_url": "http://localhost:9000/user-file/...",
+  "file_url": "http://localhost:8080/api/storage/file/{uuid}",
   "file_key": "user_id/images/...",
   "file_size": 1048576,
   "content_type": "image/jpeg",
   "preview_support": "inline_preview"
 }
 ```
+
+### GET /api/storage/file/{uuid}
+
+通过UUID访问文件（需鉴权）
+
+**Headers:**
+- `Authorization: Bearer {access_token}`
+
+**Response:**
+- 成功：返回文件流（200 OK）
+- 无权限：403 Forbidden
+- 不存在：404 Not Found
 
 ### GET /api/storage/multipart/part-url
 
@@ -251,7 +318,10 @@ const uploadLargeFile = async (file) => {
 
 ## 🔒 安全特性
 
-1. **哈希验证**：服务端验证上传后的文件哈希与客户端提供的哈希是否匹配
+1. **采样哈希验证**：
+   - 小文件：完整SHA-256哈希验证
+   - 大文件：采样哈希用于去重检查，不做完整性验证
+   - 服务端跳过哈希验证以避免内存溢出
 2. **大小验证**：验证实际上传的文件大小与声明的大小是否一致
 3. **一次性Token**：每个Token只能使用一次，使用后自动失效
 4. **权限验证**：好友文件需验证好友关系，群文件需验证群成员关系
@@ -271,15 +341,51 @@ const uploadLargeFile = async (file) => {
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | id | UUID | 主键 |
-| file_key | VARCHAR(500) | 文件key（唯一） |
-| file_url | TEXT | 访问URL |
+| file_key | VARCHAR(500) | 文件key（唯一，用户的虚拟路径） |
+| file_url | TEXT | 访问URL（UUID格式） |
 | file_hash | VARCHAR(64) | SHA-256哈希 |
+| **file_uuid** | **VARCHAR(36)** | **关联UUID映射表** |
+| physical_file_key | VARCHAR(500) | 物理文件key（已废弃，被UUID机制取代） |
 | owner_id | VARCHAR(255) | 所有者ID |
 | file_size | BIGINT | 文件大小 |
 | status | VARCHAR(20) | 状态（pending/completed/failed） |
 | upload_token | VARCHAR(128) | 一次性上传Token |
 | preview_support | VARCHAR(20) | 预览支持 |
 | expires_at | TIMESTAMPTZ | 过期时间 |
+
+### file_uuid_mapping 表
+
+UUID映射表，实现跨用户去重。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| uuid | VARCHAR(36) | 主键，随机UUID |
+| physical_file_key | VARCHAR(500) | 实际物理文件路径 |
+| file_hash | VARCHAR(64) | SHA-256哈希（用于查重） |
+| file_size | BIGINT | 文件大小 |
+| content_type | VARCHAR(100) | MIME类型 |
+| preview_support | VARCHAR(20) | 预览支持 |
+| first_uploader_id | VARCHAR(255) | 首次上传者（审计用） |
+| created_at | TIMESTAMPTZ | 创建时间 |
+
+### file_access_permissions 表
+
+文件访问权限表，控制谁可以访问。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | UUID | 主键 |
+| file_uuid | VARCHAR(36) | 关联映射表的UUID |
+| user_id | VARCHAR(255) | 有权访问的用户ID |
+| access_type | VARCHAR(20) | 权限类型（owner/read） |
+| granted_by | VARCHAR(50) | 授权来源（upload/share/friend/group） |
+| related_context | VARCHAR(500) | 关联上下文（好友ID/群ID等） |
+| granted_at | TIMESTAMPTZ | 授权时间 |
+| revoked_at | TIMESTAMPTZ | 软删除时间 |
+
+### file_references 表
+
+文件引用表（已废弃，被UUID机制取代）。
 
 ### user_storage_quotas 表
 

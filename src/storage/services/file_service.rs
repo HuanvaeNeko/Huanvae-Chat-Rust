@@ -6,23 +6,26 @@ use tracing::info;
 
 use crate::storage::client::S3Client;
 use crate::storage::models::*;
-use crate::storage::services::{DeduplicationService, FileValidator};
+use crate::storage::services::{DeduplicationService, FileValidator, UuidMappingService};
 
 /// 统一文件上传服务
 pub struct FileService {
     db: PgPool,
     s3_client: Arc<S3Client>,
     dedup_service: Arc<DeduplicationService>,
+    uuid_mapping_service: Arc<UuidMappingService>,
     api_base_url: String,
 }
 
 impl FileService {
     pub fn new(db: PgPool, s3_client: Arc<S3Client>, api_base_url: String) -> Self {
         let dedup_service = Arc::new(DeduplicationService::new(db.clone(), s3_client.clone()));
+        let uuid_mapping_service = Arc::new(UuidMappingService::new(db.clone()));
         Self {
             db,
             s3_client,
             dedup_service,
+            uuid_mapping_service,
             api_base_url,
         }
     }
@@ -33,19 +36,57 @@ impl FileService {
         user_id: &str,
         request: FileUploadRequest,
     ) -> Result<FileUploadResponse> {
-        // 1. 验证哈希格式
-        FileValidator::validate_hash(&request.file_hash)?;
+        // 1. 验证哈希格式（如果提供了哈希）
+        let file_hash = request.file_hash.as_deref().unwrap_or("no_hash");
+        if request.file_hash.is_some() {
+            FileValidator::validate_hash(file_hash)?;
+        }
 
-        // 2. 秒传检查（除非force_upload=true）
-        if !request.force_upload.unwrap_or(false) {
+        // 2. 判断文件类型和预览支持
+        let is_friend_message = matches!(
+            request.storage_location,
+            StorageLocation::FriendMessages
+        );
+        let (_file_type, preview_support) = FileValidator::determine_file_type_and_preview(
+            &request.content_type,
+            request.file_size,
+            is_friend_message,
+        )?;
+
+        // 3. 验证文件类型和大小
+        FileValidator::validate_file_type(&request.file_type, &request.content_type)?;
+        FileValidator::validate_file_size(&request.file_type, request.file_size)?;
+
+        // 4. 生成唯一file_key（按照MinIO/data.md规范）
+        let file_key = self.generate_file_key(
+            &request.storage_location,
+            &request.file_type,
+            user_id,
+            request.related_id.as_deref(),
+            &request.filename,
+            file_hash,
+        );
+
+        // 5. 秒传检查（仅当提供了哈希且force_upload=false时）
+        if !request.force_upload.unwrap_or(false) && request.file_hash.is_some() {
             if let Some(existing) = self.dedup_service
-                .check_file_exists_by_hash(&request.file_hash, user_id, &request.file_type)
+                .check_and_create_uuid_reference(
+                    file_hash,
+                    user_id,
+                    &request.file_type,
+                    &request.storage_location,
+                    request.related_id.as_deref(),
+                    &file_key,
+                    request.file_size as i64,
+                    &request.content_type,
+                    &preview_support,
+                )
                 .await?
             {
-                info!("秒传成功: 用户 {} 复用文件 {}", user_id, existing.file_key);
+                info!("秒传成功(UUID映射): 用户 {} 复用文件 {}", user_id, existing.file_key);
                 return Ok(FileUploadResponse {
                     mode: UploadMode::OneTimeToken,
-                    preview_support: PreviewSupport::InlinePreview,
+                    preview_support,
                     upload_token: None,
                     upload_url: None,
                     expires_in: None,
@@ -59,33 +100,8 @@ impl FileService {
             }
         }
 
-        // 3. 判断文件类型和预览支持
-        let is_friend_message = matches!(
-            request.storage_location,
-            StorageLocation::FriendMessages
-        );
-        let (_file_type, preview_support) = FileValidator::determine_file_type_and_preview(
-            &request.content_type,
-            request.file_size,
-            is_friend_message,
-        )?;
-
-        // 4. 验证文件类型和大小
-        FileValidator::validate_file_type(&request.file_type, &request.content_type)?;
-        FileValidator::validate_file_size(&request.file_type, request.file_size)?;
-
-        // 5. 判断上传模式
+        // 6. 判断上传模式
         let upload_mode = FileValidator::determine_upload_mode(request.file_size);
-
-        // 6. 生成唯一file_key（按照MinIO/data.md规范）
-        let file_key = self.generate_file_key(
-            &request.storage_location,
-            &request.file_type,
-            user_id,
-            request.related_id.as_deref(),
-            &request.filename,
-            &request.file_hash,
-        );
 
         // 7. 根据模式生成上传凭证
         let response = match upload_mode {
@@ -118,8 +134,10 @@ impl FileService {
         request: &FileUploadRequest,
         preview_support: PreviewSupport,
     ) -> Result<FileUploadResponse> {
+        let file_hash = request.file_hash.as_deref().unwrap_or("no_hash");
+        
         // 生成一次性Token
-        let upload_token = Self::generate_upload_token(file_key, user_id, &request.file_hash);
+        let upload_token = Self::generate_upload_token(file_key, user_id, file_hash);
         
         // 计算有效期
         let expires_in = FileValidator::calculate_expires_in(request.file_size, request.estimated_upload_time);
@@ -140,7 +158,7 @@ impl FileService {
             request.related_id.as_deref(),
             request.file_size,
             &request.content_type,
-            &request.file_hash,
+            file_hash,
             &upload_token,
             expires_in,
             &preview_support,
@@ -169,6 +187,8 @@ impl FileService {
         request: &FileUploadRequest,
         preview_support: PreviewSupport,
     ) -> Result<FileUploadResponse> {
+        let file_hash = request.file_hash.as_deref().unwrap_or("no_hash");
+        
         let expires_in = request.estimated_upload_time
             .ok_or_else(|| anyhow::anyhow!("超大文件必须指定预计上传时间"))?;
         
@@ -188,7 +208,7 @@ impl FileService {
             request.related_id.as_deref(),
             request.file_size,
             &request.content_type,
-            &request.file_hash,
+            file_hash,
             "",
             expires_in,
             &preview_support,
@@ -357,16 +377,37 @@ impl FileService {
         Ok(record)
     }
 
-    /// 完成上传（消费Token）
+    /// 完成上传（消费Token）并创建UUID映射
     pub async fn complete_upload_with_token(
         &self,
         token: &str,
         actual_hash: &str,
-    ) -> Result<()> {
+        file_key: &str,
+        owner_id: &str,
+        file_size: i64,
+        content_type: &str,
+        preview_support: &str,
+    ) -> Result<String> {
+        // 创建UUID映射
+        let file_uuid = self.uuid_mapping_service
+            .create_mapping(file_key, actual_hash, file_size, content_type, preview_support, owner_id)
+            .await?;
+        
+        // 授予上传者权限
+        self.uuid_mapping_service
+            .grant_permission(&file_uuid, owner_id, "owner", "upload")
+            .await?;
+        
+        // 生成UUID访问URL
+        let uuid_file_url = format!("http://localhost:8080/api/storage/file/{}", file_uuid);
+        
+        // 更新file_records
         let result = sqlx::query(
             "UPDATE file_records 
             SET status = 'completed',
                 upload_token = NULL,
+                file_url = $3,
+                file_uuid = $4,
                 completed_at = NOW()
             WHERE upload_token = $1
               AND file_hash = $2
@@ -374,6 +415,8 @@ impl FileService {
         )
         .bind(token)
         .bind(actual_hash)
+        .bind(&uuid_file_url)
+        .bind(&file_uuid)
         .execute(&self.db)
         .await?;
 
@@ -381,7 +424,7 @@ impl FileService {
             return Err(anyhow::anyhow!("Token无效或哈希不匹配"));
         }
 
-        Ok(())
+        Ok(uuid_file_url)
     }
 
     /// 获取bucket名称

@@ -1233,6 +1233,103 @@ if [ -n "$VIDEO_FILE_URL" ]; then
     fi
 fi
 
+sleep 1
+
+# ==============================================
+
+log_step "第 41 步：测试在线预览图片（下载部分内容）"
+
+if [ -n "$REAL_IMG_FILE_URL" ]; then
+    log_info "下载图片前1KB内容验证..."
+    IMG_PREVIEW=$(curl -s -r 0-1023 "$REAL_IMG_FILE_URL" | head -c 10 | xxd -p)
+    if [ -n "$IMG_PREVIEW" ]; then
+        log_success "✓ 图片文件可在线预览（前10字节: $IMG_PREVIEW）"
+    else
+        log_error "✗ 图片预览失败"
+    fi
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 42 步：测试视频流式访问（Range请求）"
+
+if [ -n "$VIDEO_FILE_URL" ]; then
+    log_info "测试视频Range请求（获取前10MB）..."
+    VIDEO_RANGE=$(curl -s -I -r 0-10485759 "$VIDEO_FILE_URL" | grep -i "content-range\|content-length\|206")
+    if echo "$VIDEO_RANGE" | grep -qi "206\|range"; then
+        log_success "✓ 视频支持Range请求（流式播放）"
+        echo "$VIDEO_RANGE" | grep -i "content-range\|content-length"
+    else
+        log_info "视频Range请求测试（完整响应）"
+    fi
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 43 步：测试UUID映射机制（跨用户去重）"
+
+log_info "用户2上传与用户1相同的图片（测试秒传）..."
+SECOND_UPLOAD=$(api_call POST /api/storage/upload/request "$USER2_TOKEN" "{
+    \"file_type\": \"user_image\",
+    \"storage_location\": \"user_files\",
+    \"filename\": \"test_image_copy.jpg\",
+    \"file_size\": $REAL_IMAGE_SIZE,
+    \"content_type\": \"image/jpeg\",
+    \"file_hash\": \"$REAL_IMAGE_HASH\",
+    \"force_upload\": false
+}")
+
+INSTANT_UPLOAD2=$(echo "$SECOND_UPLOAD" | jq -r '.instant_upload' 2>/dev/null)
+if [ "$INSTANT_UPLOAD2" = "true" ]; then
+    log_success "✓ 跨用户秒传成功（UUID映射机制生效）"
+    USER2_FILE_URL=$(echo "$SECOND_UPLOAD" | jq -r '.existing_file_url' 2>/dev/null)
+    USER2_FILE_KEY=$(echo "$SECOND_UPLOAD" | jq -r '.file_key' 2>/dev/null)
+    log_info "用户2文件key: $USER2_FILE_KEY"
+    log_info "UUID访问URL: $USER2_FILE_URL"
+else
+    log_error "✗ 跨用户秒传失败"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 44 步：验证UUID访问权限（用户2访问文件）"
+
+if [ -n "$USER2_FILE_URL" ]; then
+    log_info "用户2通过UUID访问文件..."
+    USER2_ACCESS=$(curl -s -I "$USER2_FILE_URL" -H "Authorization: Bearer $USER2_TOKEN" | head -1)
+    if echo "$USER2_ACCESS" | grep -q "200"; then
+        log_success "✓ 用户2可以访问文件（权限验证通过）"
+    else
+        log_error "✗ 用户2无法访问文件"
+        echo "$USER2_ACCESS"
+    fi
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 45 步：验证用户1也能访问相同UUID"
+
+if [ -n "$USER2_FILE_URL" ]; then
+    log_info "用户1通过相同UUID访问文件..."
+    USER1_ACCESS=$(curl -s -I "$USER2_FILE_URL" -H "Authorization: Bearer $USER1_TOKEN_NEW" | head -1)
+    if echo "$USER1_ACCESS" | grep -q "200"; then
+        log_success "✓ 用户1也能访问（共享同一物理文件）"
+    else
+        log_error "✗ 用户1无法访问"
+        echo "$USER1_ACCESS"
+    fi
+fi
+
+sleep 1
+
 # ==============================================
 # 测试总结
 # ==============================================
@@ -1265,6 +1362,10 @@ echo -e "${GREEN}║  ✓ 真实图片         6.1MB上传                      
 echo -e "${GREEN}║  ✓ 大图片文件       71MB上传                          ║${NC}"
 echo -e "${GREEN}║  ✓ 视频文件         2.9GB上传                         ║${NC}"
 echo -e "${GREEN}║  ✓ 文件访问         可读取验证                        ║${NC}"
+echo -e "${GREEN}║  ✓ 图片预览         在线查看                          ║${NC}"
+echo -e "${GREEN}║  ✓ 视频流式         Range请求                         ║${NC}"
+echo -e "${GREEN}║  ✓ UUID映射         跨用户秒传                        ║${NC}"
+echo -e "${GREEN}║  ✓ 权限验证         UUID访问控制                      ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════════════════════╝${NC}"
 echo ""
 

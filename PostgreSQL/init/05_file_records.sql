@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS file_records (
     -- 哈希值（去重和完整性校验）
     file_hash VARCHAR(64) NOT NULL,
     
+    -- 物理文件引用（用于去重）
+    physical_file_key VARCHAR(500),
+    
     -- 上传凭证
     upload_token VARCHAR(128),
     multipart_upload_id VARCHAR(200),

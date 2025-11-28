@@ -12,7 +12,7 @@ use tracing::{error, info};
 use crate::auth::middleware::AuthContext;
 use crate::storage::client::S3Client;
 use crate::storage::models::*;
-use crate::storage::services::{compute_sha256, FileService};
+use crate::storage::services::FileService;
 
 /// Storage状态
 #[derive(Clone)]
@@ -105,19 +105,9 @@ pub async fn direct_upload(
         )
     })?;
 
-    // 3. 验证文件哈希
-    let actual_hash = compute_sha256(&data);
-    if actual_hash != file_record.file_hash {
-        error!("文件哈希不匹配: 期望 {}, 实际 {}", file_record.file_hash, actual_hash);
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({ 
-                "error": "文件哈希不匹配，文件可能已损坏",
-                "expected": file_record.file_hash,
-                "actual": actual_hash
-            })),
-        ));
-    }
+    // 3. 跳过哈希验证（采样哈希无法在服务端验证）
+    // 采样哈希由客户端计算，服务端仅用于去重检查
+    info!("文件上传成功，采样哈希: {}", file_record.file_hash);
 
     // 4. 验证文件大小
     if data.len() as i64 != file_record.file_size {
@@ -132,14 +122,14 @@ pub async fn direct_upload(
         ));
     }
 
-    // 5. 上传到MinIO
+    // 5. 上传到MinIO（但不再使用MinIO URL作为file_url）
     let storage_loc: StorageLocation = file_record.storage_location.parse()
         .map_err(|e: String| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": e })),
         ))?;
     let bucket = state.file_service.get_bucket_name(&storage_loc);
-    let file_url = match state.s3_client
+    let _minio_url = match state.s3_client
         .upload_file(bucket, &file_record.file_key, data, &file_record.content_type)
         .await
     {
@@ -153,16 +143,24 @@ pub async fn direct_upload(
         }
     };
 
-    // 6. 标记为完成并消费Token
+    // 6. 标记为完成并消费Token，创建UUID映射
     match state.file_service
-        .complete_upload_with_token(&params.token, &actual_hash)
+        .complete_upload_with_token(
+            &params.token, 
+            &file_record.file_hash,  // 使用客户端提供的采样哈希
+            &file_record.file_key,
+            &file_record.owner_id,
+            file_record.file_size,
+            &file_record.content_type,
+            &file_record.preview_support
+        )
         .await
     {
-        Ok(_) => {
-            info!("文件上传成功: {}", file_record.file_key);
+        Ok(uuid_file_url) => {
+            info!("文件上传成功并创建UUID映射: {}", file_record.file_key);
             let preview_support = file_record.preview_support();
             Ok(Json(FileCompleteResponse {
-                file_url,
+                file_url: uuid_file_url,  // 返回UUID访问URL
                 file_key: file_record.file_key.clone(),
                 file_size: file_record.file_size as u64,
                 content_type: file_record.content_type.clone(),

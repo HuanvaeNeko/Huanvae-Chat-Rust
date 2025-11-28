@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Token Manager 测试</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 { color: #333; }
+    .status { padding: 15px; margin: 10px 0; border-radius: 5px; }
+    .success { background: #d4edda; color: #155724; }
+    .warning { background: #fff3cd; color: #856404; }
+    .error { background: #f8d7da; color: #721c24; }
+    button {
+      padding: 10px 20px;
+      margin: 5px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      background: #007bff;
+      color: white;
+    }
+    button:hover { background: #0056b3; }
+    .danger { background: #dc3545; }
+    .danger:hover { background: #c82333; }
+    pre { background: #fff; padding: 15px; border-radius: 5px; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <h1>🔧 Token Manager 测试工具</h1>
+  
+  <div id="status"></div>
+  
+  <h2>操作</h2>
+  <button onclick="runDiagnose()">🔍 运行诊断</button>
+  <button onclick="syncToken()">📤 手动同步Token</button>
+  <button onclick="testVideoAccess()">🎬 测试视频访问</button>
+  <button class="danger" onclick="clearAll()">🗑️ 清除所有数据</button>
+  <button onclick="location.href='index.html'">↩️ 返回主页</button>
+  
+  <h2>诊断结果</h2>
+  <pre id="result"></pre>
+
+  <script src="token-manager.js"></script>
+  <script>
+    async function runDiagnose() {
+      const result = document.getElementById('result');
+      const status = document.getElementById('status');
+      
+      result.textContent = '正在诊断...';
+      
+      const diagnostics = await tokenManager.diagnose();
+      
+      let statusHTML = '';
+      if (diagnostics.serviceWorkerController && diagnostics.hasAccessToken) {
+        statusHTML = '<div class="status success">✅ 所有检查通过！可以使用流式播放功能</div>';
+      } else if (!diagnostics.hasAccessToken) {
+        statusHTML = '<div class="status error">❌ 未登录！请先登录</div>';
+      } else if (!diagnostics.serviceWorkerController) {
+        statusHTML = '<div class="status warning">⚠️ Service Worker未控制页面！需要刷新</div>';
+      }
+      
+      status.innerHTML = statusHTML;
+      result.textContent = JSON.stringify(diagnostics, null, 2);
+    }
+    
+    async function syncToken() {
+      const result = document.getElementById('result');
+      result.textContent = '正在同步token...';
+      
+      const success = await tokenManager.syncToServiceWorker();
+      result.textContent = success ? '✅ Token同步成功' : '❌ Token同步失败';
+    }
+    
+    async function testVideoAccess() {
+      const result = document.getElementById('result');
+      result.textContent = '正在测试视频访问...';
+      
+      const token = tokenManager.getAccessToken();
+      if (!token) {
+        result.textContent = '❌ 没有access token';
+        return;
+      }
+      
+      // 从localStorage获取一个已上传的文件URL
+      const uploadedFiles = JSON.parse(localStorage.getItem('uploadedFiles') || '[]');
+      if (uploadedFiles.length === 0) {
+        result.textContent = '⚠️ 没有已上传的文件用于测试';
+        return;
+      }
+      
+      const testFile = uploadedFiles[0];
+      result.textContent = `测试文件: ${testFile.filename}\nURL: ${testFile.file_url}\n\n`;
+      
+      try {
+        const response = await fetch(testFile.file_url, {
+          method: 'HEAD',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        result.textContent += `\n状态码: ${response.status}\n`;
+        result.textContent += `状态文本: ${response.statusText}\n\n`;
+        
+        if (response.ok) {
+          result.textContent += '✅ 访问成功！';
+        } else {
+          result.textContent += '❌ 访问失败！';
+        }
+      } catch (error) {
+        result.textContent += `\n❌ 请求失败: ${error.message}`;
+      }
+    }
+    
+    async function clearAll() {
+      if (!confirm('确定要清除所有数据吗？这将清除tokens和Service Worker')) {
+        return;
+      }
+      
+      const result = document.getElementById('result');
+      result.textContent = '正在清除...';
+      
+      // 清除tokens
+      tokenManager.clearTokens();
+      
+      // 注销Service Worker
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      for(let registration of registrations) {
+        await registration.unregister();
+      }
+      
+      // 清除缓存
+      const cacheNames = await caches.keys();
+      for (let cacheName of cacheNames) {
+        await caches.delete(cacheName);
+      }
+      
+      result.textContent = '✅ 已清除所有数据\n\n建议刷新页面';
+    }
+    
+    // 页面加载时自动诊断
+    window.addEventListener('DOMContentLoaded', async () => {
+      await tokenManager.initialize();
+      await runDiagnose();
+    });
+  </script>
+</body>
+</html>
+

@@ -15,9 +15,9 @@ pub struct FileUploadRequest {
     
     pub content_type: String,
     
-    /// 文件哈希（SHA-256，客户端计算）
-    #[validate(length(equal = 64))]
-    pub file_hash: String,
+    /// 文件哈希（SHA-256，客户端计算，采样哈希）
+    /// 采样策略：文件元信息 + 开头10MB + 中间10MB + 结尾10MB
+    pub file_hash: Option<String>,
     
     /// 预计上传时间（秒，仅超大文件需要）
     #[validate(range(min = 3600, max = 604800))] // 1小时到7天

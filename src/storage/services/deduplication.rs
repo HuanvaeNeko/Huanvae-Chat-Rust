@@ -2,50 +2,78 @@ use sqlx::PgPool;
 use std::sync::Arc;
 
 use crate::storage::client::S3Client;
-use crate::storage::models::{ExistingFileInfo, FileType};
+use crate::storage::models::{ExistingFileInfo, FileType, StorageLocation, PreviewSupport};
+use crate::storage::services::UuidMappingService;
 
 /// 去重服务
 pub struct DeduplicationService {
     db: PgPool,
     s3_client: Arc<S3Client>,
+    uuid_mapping_service: Arc<UuidMappingService>,
 }
 
 impl DeduplicationService {
     pub fn new(db: PgPool, s3_client: Arc<S3Client>) -> Self {
-        Self { db, s3_client }
+        let uuid_mapping_service = Arc::new(UuidMappingService::new(db.clone()));
+        Self { 
+            db, 
+            s3_client,
+            uuid_mapping_service,
+        }
     }
 
-    /// 检查文件哈希是否已存在（秒传核心）
-    pub async fn check_file_exists_by_hash(
+    /// 检查文件哈希并创建UUID映射引用（秒传核心）
+    pub async fn check_and_create_uuid_reference(
         &self,
         file_hash: &str,
-        _user_id: &str,
+        user_id: &str,
         _file_type: &FileType,
+        _storage_location: &StorageLocation,
+        _related_id: Option<&str>,
+        new_file_key: &str,
+        file_size: i64,
+        content_type: &str,
+        preview_support: &PreviewSupport,
     ) -> Result<Option<ExistingFileInfo>, anyhow::Error> {
-        // 查询是否有相同哈希的已完成文件
-        let existing = sqlx::query_as::<_, ExistingFileInfoRow>(
-            "SELECT file_key, file_url, file_size, content_type
-            FROM file_records
-            WHERE file_hash = $1
-              AND status = 'completed'
-              AND deleted_at IS NULL
-              AND file_url IS NOT NULL
-            ORDER BY created_at DESC
-            LIMIT 1"
-        )
-        .bind(file_hash)
-        .fetch_optional(&self.db)
-        .await?;
+        // 查询是否存在相同哈希的文件
+        if let Some(mapping) = self.uuid_mapping_service.find_by_hash(file_hash).await? {
+            // 验证MinIO中物理文件确实存在
+            let bucket = Self::extract_bucket_from_key(&mapping.physical_file_key);
+            if self.s3_client.file_exists(bucket, &mapping.physical_file_key).await? {
+                // 授予当前用户访问权限
+                self.uuid_mapping_service
+                    .grant_permission(&mapping.uuid, user_id, "owner", "upload")
+                    .await?;
 
-        if let Some(row) = existing {
-            // 验证MinIO中文件确实存在
-            let bucket = Self::extract_bucket_from_key(&row.file_key);
-            if self.s3_client.file_exists(bucket, &row.file_key).await? {
+                // 创建file_records记录
+                sqlx::query(
+                    "INSERT INTO file_records 
+                    (file_key, owner_id, file_type, storage_location, related_id,
+                     file_size, content_type, file_hash, physical_file_key, file_uuid, status,
+                     file_url, preview_support, created_at, completed_at, expires_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'completed', $11, $12, NOW(), NOW(), NOW() + INTERVAL '1 year')
+                    ON CONFLICT (file_key) DO NOTHING"
+                )
+                .bind(new_file_key)
+                .bind(user_id)
+                .bind(_file_type.to_string())
+                .bind(_storage_location.to_string())
+                .bind(_related_id)
+                .bind(file_size)
+                .bind(content_type)
+                .bind(file_hash)
+                .bind(&mapping.physical_file_key)
+                .bind(&mapping.uuid)
+                .bind(format!("http://localhost:8080/api/storage/file/{}", mapping.uuid))  // 使用UUID访问URL
+                .bind(preview_support.to_string())
+                .execute(&self.db)
+                .await?;
+
                 return Ok(Some(ExistingFileInfo {
-                    file_key: row.file_key,
-                    file_url: row.file_url,
-                    file_size: row.file_size,
-                    content_type: row.content_type,
+                    file_key: new_file_key.to_string(),
+                    file_url: format!("http://localhost:8080/api/storage/file/{}", mapping.uuid),
+                    file_size: mapping.file_size,
+                    content_type: mapping.content_type,
                 }));
             }
         }
@@ -56,20 +84,10 @@ impl DeduplicationService {
     /// 从file_key提取bucket名称
     fn extract_bucket_from_key(file_key: &str) -> &str {
         if file_key.contains('/') {
-            // user-file, friends-file等
             "user-file"
         } else {
-            // avatars
             "avatars"
         }
     }
-}
-
-#[derive(sqlx::FromRow)]
-struct ExistingFileInfoRow {
-    file_key: String,
-    file_url: String,
-    file_size: i64,
-    content_type: String,
 }
 

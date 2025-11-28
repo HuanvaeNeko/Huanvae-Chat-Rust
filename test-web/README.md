@@ -184,6 +184,110 @@ POST   /api/messages/recall   - 撤回消息
 - ✅ 支持分页加载更多消息
 - ✅ 一键删除和撤回按钮
 - ✅ 消息UUID自动复制到操作区
+- ✅ 文件上传进度显示
+- ✅ 秒传功能标识（⚡图标）
+- ✅ **图片在线预览（支持UUID访问权限验证）**
+- ✅ **视频真正流式播放（通过Service Worker实现）**
+- ✅ **PDF在线查看（支持UUID访问）**
+- ✅ **UUID文件自动类型检测（通过文件名后缀）**
+- ✅ **授权下载功能（UUID文件需要Bearer Token）**
+- ✅ **已上传文件列表管理**
+- ✅ **Service Worker代理（支持视频流式Range请求）**
+
+## 📦 文件存储功能说明
+
+### 文件上传
+1. **采样SHA-256哈希计算**: 
+   - **小文件（< 30MB）**：计算完整文件哈希
+   - **大文件（≥ 30MB）**：使用**采样哈希**策略（文件元信息 + 开头10MB + 中间10MB + 结尾10MB）
+   - 避免大文件内存溢出问题，3GB视频也能秒传
+2. **分片上传**: 超大文件（>15GB）自动分片上传
+3. **进度显示**: 实时显示上传进度
+4. **秒传检测**: 文件已存在时跳过上传，直接返回UUID
+5. **文件类型**: 支持用户图片、用户视频、用户文档
+
+### 为什么使用采样哈希？
+- **内存限制**: 浏览器无法一次性将3GB+文件加载到内存计算哈希
+- **速度优化**: 采样哈希只需读取约30MB数据，几秒内完成
+- **足够唯一**: 文件元信息（名称+大小+修改时间+类型）+ 三个采样点（开头/中间/结尾各10MB），已经能够唯一识别文件
+- **秒传支持**: 相同文件的采样哈希相同，仍然可以实现秒传
+- **服务端验证**: 采样哈希仅用于去重检查，不做完整性验证（大文件场景下可接受）
+
+### 文件下载与预览
+1. **智能类型检测**: 
+   - 根据文件名后缀自动判断文件类型
+   - 无需额外的HEAD请求，速度更快
+   
+2. **图片预览**:
+   - 支持 jpg, jpeg, png, gif, webp 格式
+   - UUID文件通过Bearer Token认证后加载
+   - 普通URL直接预览
+   
+3. **视频播放**（🚀 真正的流式播放）:
+   - 支持 mp4, webm, ogg, mov 格式
+   - **使用Service Worker代理技术**
+   - **边看边加载，无需等待完整下载**
+   - 支持拖动进度条立即响应（真正的Range请求）
+   - 支持快进/快退
+   - 节省流量和内存
+   - 大视频（3GB+）也能流畅播放
+   
+4. **PDF查看**:
+   - 内嵌iframe预览
+   - UUID文件需要权限验证
+   
+5. **文件下载**:
+   - UUID文件使用`downloadUuidFile()`函数，自动添加Authorization头
+   - 下载时显示进度提示
+   - 支持自定义文件名
+
+### Service Worker 流式播放技术
+
+**工作原理**：
+```
+1. 页面加载时自动注册Service Worker (sw.js)
+2. Service Worker拦截所有 /api/storage/file/ 请求
+3. 在请求中自动注入Authorization头
+4. video标签可以直接使用UUID URL
+5. 浏览器发送Range请求 → Service Worker代理 → 服务器返回部分数据
+6. 实现真正的边看边加载
+```
+
+**优势**：
+- ✅ **真正的流式播放**：浏览器原生Range请求支持
+- ✅ **无需完整下载**：只下载当前播放的片段
+- ✅ **拖动进度条立即响应**：跳到任意位置立即开始加载
+- ✅ **节省流量**：只加载观看的部分
+- ✅ **节省内存**：不需要将整个文件加载到内存
+- ✅ **支持大文件**：3GB+视频也能流畅播放
+
+**技术细节**：
+```javascript
+// Service Worker (sw.js)
+self.addEventListener('fetch', (event) => {
+  if (url.pathname.startsWith('/api/storage/file/')) {
+    // 拦截请求并注入Authorization
+    const authenticatedRequest = new Request(request, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    event.respondWith(fetch(authenticatedRequest));
+  }
+});
+```
+
+**浏览器要求**：
+- ✅ 支持Service Worker（所有现代浏览器）
+- ✅ HTTPS或localhost（本地开发无需HTTPS）
+- ✅ 不支持IE浏览器
+
+### UUID访问机制
+- 所有通过 `/api/storage/file/{uuid}` 访问的文件需要Bearer Token
+- 前端自动从localStorage读取accessToken
+- HEAD请求获取文件元信息（Content-Type、大小等）
+- GET请求获取文件内容
+- 支持Range请求（未来可支持视频真正的流式播放）
 
 ## 📝 开发说明
 

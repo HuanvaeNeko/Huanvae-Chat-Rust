@@ -27,6 +27,11 @@
         <input id="messagesApiBase" type="text" placeholder="http://localhost:8080/api/messages" />
         <button id="saveMessagesBase">保存</button>
       </div>
+      <div class="row">
+        <label for="storageApiBase">Storage API 基地址</label>
+        <input id="storageApiBase" type="text" placeholder="http://localhost:8080/api/storage" />
+        <button id="saveStorageBase">保存</button>
+      </div>
       <small>仅前端配置，未修改后端</small>
     </section>
 
@@ -208,6 +213,69 @@
     </section>
 
     <section class="card">
+      <h2>文件存储功能</h2>
+      
+      <h3>上传文件</h3>
+      <div class="row">
+        <label>选择文件</label>
+        <input id="file_input" type="file" />
+      </div>
+      <div class="row">
+        <label>文件类型</label>
+        <select id="file_type">
+          <option value="user_image">用户图片 (< 100MB)</option>
+          <option value="user_video">用户视频 (< 15GB)</option>
+          <option value="user_document">用户文档 (< 15GB)</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>存储位置</label>
+        <select id="storage_location">
+          <option value="user_files">用户文件</option>
+          <option value="friend_messages">好友消息</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>关联ID（可选）</label>
+        <input id="related_id" type="text" placeholder="好友ID或群ID" />
+      </div>
+      <div class="row">
+        <label>
+          <input id="force_upload" type="checkbox" />
+          强制上传（跳过秒传）
+        </label>
+      </div>
+      <div class="row">
+        <button id="btnUploadFile">开始上传</button>
+      </div>
+      <div id="uploadProgress" style="display: none; margin: 10px 0;">
+        <div style="background: #e0e0e0; height: 20px; border-radius: 10px;">
+          <div id="progressBar" style="background: #4caf50; height: 100%; border-radius: 10px; width: 0%; transition: width 0.3s;"></div>
+        </div>
+        <small id="progressText">准备中...</small>
+      </div>
+      <pre id="fileUploadReqFmt" class="result"></pre>
+      <pre id="fileUploadResFmt" class="result"></pre>
+
+      <hr />
+
+      <h3>已上传文件列表</h3>
+      <div id="uploadedFilesList" style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; margin: 10px 0;"></div>
+      
+      <hr />
+      
+      <h3>文件预览</h3>
+      <div class="row">
+        <label>文件URL</label>
+        <input id="preview_url" type="text" placeholder="粘贴文件URL进行预览" style="flex: 3;" />
+        <button id="btnPreviewFile">预览</button>
+      </div>
+      <div id="filePreview" style="margin: 20px 0; min-height: 200px; border: 1px solid #ddd; padding: 10px; text-align: center; background: #f9f9f9;">
+        <p style="color: #999;">文件预览区域</p>
+      </div>
+    </section>
+
+    <section class="card">
       <h2>本地状态</h2>
       <div class="row">
         <button id="btnClear">清空本地 Token</button>
@@ -216,6 +284,7 @@
     </section>
   </div>
 
+  <script src="token-manager.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
