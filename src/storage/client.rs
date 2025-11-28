@@ -2,10 +2,12 @@ use aws_config::BehaviorVersion;
 use aws_credential_types::Credentials;
 use aws_sdk_s3::{
     config::{Builder as S3ConfigBuilder, Region},
+    presigning::PresigningConfig,
     primitives::ByteStream,
     Client,
 };
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{info, warn};
 
 use super::config::S3Config;
@@ -53,12 +55,18 @@ impl S3Client {
 
     /// 初始化所有必要的 buckets
     async fn init_buckets(&self) -> Result<(), anyhow::Error> {
+        // 创建 avatars bucket（公开）
         self.create_bucket_if_not_exists(&self.config.bucket_avatars)
             .await?;
         
         // 设置头像 bucket 为公开读取
         self.set_bucket_public_read(&self.config.bucket_avatars)
             .await?;
+
+        // 创建其他私有 buckets（按照 MinIO/data.md 规范）
+        self.create_bucket_if_not_exists("user-file").await?;
+        self.create_bucket_if_not_exists("friends-file").await?;
+        self.create_bucket_if_not_exists("group-file").await?;
 
         Ok(())
     }
@@ -182,5 +190,147 @@ impl S3Client {
     pub fn config(&self) -> &S3Config {
         &self.config
     }
+
+    /// 生成预签名上传URL（PUT方法）
+    pub async fn generate_presigned_upload_url(
+        &self,
+        bucket: &str,
+        key: &str,
+        content_type: &str,
+        expires_in: u32,
+    ) -> Result<String, anyhow::Error> {
+        let presigning_config = PresigningConfig::builder()
+            .expires_in(Duration::from_secs(expires_in as u64))
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to build presigning config: {}", e))?;
+
+        let presigned = self.client
+            .put_object()
+            .bucket(bucket)
+            .key(key)
+            .content_type(content_type)
+            .presigned(presigning_config)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to generate presigned URL: {}", e))?;
+
+        Ok(presigned.uri().to_string())
+    }
+
+    /// 生成预签名下载URL（GET方法）
+    pub async fn generate_presigned_download_url(
+        &self,
+        bucket: &str,
+        key: &str,
+        expires_in: u32,
+    ) -> Result<String, anyhow::Error> {
+        let presigning_config = PresigningConfig::builder()
+            .expires_in(Duration::from_secs(expires_in as u64))
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to build presigning config: {}", e))?;
+
+        let presigned = self.client
+            .get_object()
+            .bucket(bucket)
+            .key(key)
+            .presigned(presigning_config)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to generate presigned URL: {}", e))?;
+
+        Ok(presigned.uri().to_string())
+    }
+
+    /// 初始化分片上传（用于超大文件）
+    pub async fn initiate_multipart_upload(
+        &self,
+        bucket: &str,
+        key: &str,
+        content_type: &str,
+    ) -> Result<String, anyhow::Error> {
+        let result = self.client
+            .create_multipart_upload()
+            .bucket(bucket)
+            .key(key)
+            .content_type(content_type)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to initiate multipart upload: {}", e))?;
+
+        let upload_id = result.upload_id()
+            .ok_or_else(|| anyhow::anyhow!("No upload_id returned"))?;
+
+        Ok(upload_id.to_string())
+    }
+
+    /// 生成分片上传的预签名URL
+    pub async fn generate_presigned_upload_part_url(
+        &self,
+        bucket: &str,
+        key: &str,
+        upload_id: &str,
+        part_number: i32,
+        expires_in: u32,
+    ) -> Result<String, anyhow::Error> {
+        let presigning_config = PresigningConfig::builder()
+            .expires_in(Duration::from_secs(expires_in as u64))
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to build presigning config: {}", e))?;
+
+        let presigned = self.client
+            .upload_part()
+            .bucket(bucket)
+            .key(key)
+            .upload_id(upload_id)
+            .part_number(part_number)
+            .presigned(presigning_config)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to generate presigned part URL: {}", e))?;
+
+        Ok(presigned.uri().to_string())
+    }
+
+    /// 检查文件是否存在
+    pub async fn file_exists(&self, bucket: &str, key: &str) -> Result<bool, anyhow::Error> {
+        match self.client
+            .head_object()
+            .bucket(bucket)
+            .key(key)
+            .send()
+            .await
+        {
+            Ok(_) => Ok(true),
+            Err(_) => Ok(false),
+        }
+    }
+
+    /// 获取文件元数据
+    pub async fn get_file_metadata(
+        &self,
+        bucket: &str,
+        key: &str,
+    ) -> Result<FileMetadata, anyhow::Error> {
+        let result = self.client
+            .head_object()
+            .bucket(bucket)
+            .key(key)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to get file metadata: {}", e))?;
+
+        Ok(FileMetadata {
+            content_length: result.content_length().unwrap_or(0) as u64,
+            content_type: result.content_type().unwrap_or("application/octet-stream").to_string(),
+            etag: result.e_tag().map(|s| s.to_string()),
+            last_modified: result.last_modified().map(|dt| dt.secs()),
+        })
+    }
+}
+
+/// 文件元数据
+#[derive(Debug, Clone)]
+pub struct FileMetadata {
+    pub content_length: u64,
+    pub content_type: String,
+    pub etag: Option<String>,
+    pub last_modified: Option<i64>,
 }
 

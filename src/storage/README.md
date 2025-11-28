@@ -1,16 +1,28 @@
 # Storage 模块
 
-对象存储（MinIO/S3）客户端封装模块，提供文件上传、下载、删除等功能，支持头像、群文件、用户文件等多种场景。
+统一文件存储管理模块，提供文件上传、下载、预览等功能，支持头像、用户文件、好友消息文件、群聊文件等多种场景。
 
 ## 📂 目录结构
 
 ```
 src/storage/
-  ├─ client.rs         // S3/MinIO 客户端封装
+  ├─ client.rs         // S3/MinIO 客户端封装（支持预签名URL和分片上传）
   ├─ config.rs         // 配置管理（从环境变量加载）
+  ├─ models/           // 数据模型层
+  │   ├─ enums.rs      // 枚举类型定义（FileType, StorageLocation等）
+  │   ├─ request.rs    // 请求结构体
+  │   ├─ response.rs   // 响应结构体
+  │   └─ mod.rs        // 模块导出
   ├─ services/         // 业务服务层
   │   ├─ avatar.rs     // 头像上传服务
+  │   ├─ validator.rs  // 文件验证服务
+  │   ├─ deduplication.rs  // 去重服务（哈希检测、秒传）
+  │   ├─ file_service.rs   // 统一文件上传服务
   │   └─ mod.rs        // 服务模块导出
+  ├─ handlers/         // HTTP 请求处理层
+  │   ├─ upload.rs     // 上传接口
+  │   ├─ routes.rs     // 路由定义
+  │   └─ mod.rs        // 处理器模块导出
   └─ mod.rs            // 模块导出
 ```
 
@@ -26,201 +38,270 @@ MINIO_SECRET_KEY=minioadmin123
 MINIO_BUCKET_AVATARS=avatars
 MINIO_PUBLIC_URL=http://localhost:9000
 MINIO_REGION=us-east-1
+
+# API 基础URL（用于生成上传URL）
+APP_BASE_URL=http://localhost:8080
+
+# 文件上传配置（可选）
+ENABLE_FILE_DEDUPLICATION=true        # 是否启用哈希去重
+ENABLE_UPLOAD_RATE_LIMIT=false        # 是否启用并发限制
+MAX_CONCURRENT_UPLOADS=5              # 最大并发上传数
 ```
 
-## 🗂️ Bucket 分区
-
-根据 `MinIO/data.md` 的规划：
+## 🗂️ 存储结构（严格按照MinIO/data.md规范）
 
 | Bucket | 用途 | 权限 | 路径规则 |
 |--------|------|------|----------|
 | `avatars` | 用户头像 | 公开读取 | `{user_id}.{ext}` |
-| `group-files` | 群聊文件 | 私有 | `{group_id}/{type}/{filename}` |
-| `user-files` | 用户文件 | 私有 | `{user_id}/{type}/{filename}` |
+| `user-file` | 用户个人文件 | 私有 | `{user_id}/{type}/{timestamp}_{hash}_{filename}` |
+| `friends-file` | 好友消息文件 | 私有 | `{conversation_uuid}/{type}/{timestamp}_{hash}_{filename}` |
+| `group-file` | 群聊文件 | 私有 | `{group_id}/{type}/{timestamp}_{hash}_{filename}` |
 
-**当前实现**：
-- ✅ `avatars` bucket（已自动创建并设置为公开读取）
-- ⏳ `group-files`（待实现）
-- ⏳ `user-files`（待实现）
+**type目录分类**：
+- `images/` - 图片文件
+- `videos/` - 视频文件
+- `files/` - 文档文件
 
-## 🏗️ 核心组件
+## 🚀 核心功能
 
-### S3Client (`client.rs`)
+### 1. 统一文件上传
 
-S3/MinIO 客户端封装，提供以下功能：
+#### **上传策略**
 
-```rust
-impl S3Client {
-    /// 创建新的 S3 客户端并初始化 buckets
-    pub async fn new(config: S3Config) -> Result<Self, anyhow::Error>
+| 文件类型 | 大小范围 | 上传方式 | 预览支持 |
+|---------|---------|---------|---------|
+| 头像 | < 5MB | 一次性Token | 在线预览 |
+| 图片 | < 100MB | 一次性Token | 在线预览 |
+| 图片（大） | 100MB - 15GB | 一次性Token | 仅下载 |
+| 视频 | < 15GB | 一次性Token | 在线预览 |
+| 视频（大） | 15GB - 30GB | 一次性Token | 仅下载 |
+| 文档 | < 15GB | 一次性Token | 仅下载 |
+| 超大文件 | 15GB - 30GB | 预签名URL（分片） | 仅下载 |
+
+#### **工作流程**
+
+```
+1. 客户端计算文件SHA-256哈希
+2. 请求上传 → POST /api/storage/upload/request
+   ├─ 秒传检查（哈希去重）
+   ├─ 权限验证
+   ├─ 文件类型和大小验证
+   └─ 生成上传凭证（Token或预签名URL）
+3. 客户端直连MinIO上传（使用Token或预签名URL）
+4. 上传完成通知（Token自动验证和消费）
+```
+
+### 2. 秒传功能（哈希去重）
+
+- 客户端计算文件SHA-256哈希
+- 服务端检查数据库中是否已存在相同哈希的文件
+- 如果存在且MinIO中文件可用，直接返回已有文件URL
+- 支持`force_upload=true`强制重新上传
+
+### 3. 一次性Token上传（< 15GB）
+
+```javascript
+// 前端示例
+const uploadFile = async (file) => {
+  // 1. 计算哈希
+  const fileHash = await calculateSHA256(file);
+  
+  // 2. 请求上传
+  const response = await fetch('/api/storage/upload/request', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      file_type: 'user_image',
+      storage_location: 'user_files',
+      filename: file.name,
+      file_size: file.size,
+      content_type: file.type,
+      file_hash: fileHash,
+      force_upload: false,
+    }),
+  });
+  
+  const { upload_url, instant_upload, existing_file_url } = await response.json();
+  
+  // 3. 检查秒传
+  if (instant_upload) {
+    console.log('秒传成功！', existing_file_url);
+    return existing_file_url;
+  }
+  
+  // 4. 上传文件
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  const uploadResponse = await fetch(upload_url, {
+    method: 'POST',
+    body: formData,
+  });
+  
+  return await uploadResponse.json();
+};
+```
+
+### 4. 预签名URL分片上传（> 15GB）
+
+```javascript
+// 超大文件分片上传示例
+const uploadLargeFile = async (file) => {
+  // 1. 请求上传（获取multipart_upload_id）
+  const { multipart_upload_id, file_key } = await requestUpload(file);
+  
+  // 2. 分片上传
+  const chunkSize = 50 * 1024 * 1024; // 50MB
+  const chunks = Math.ceil(file.size / chunkSize);
+  
+  for (let i = 0; i < chunks; i++) {
+    const start = i * chunkSize;
+    const end = Math.min(start + chunkSize, file.size);
+    const chunk = file.slice(start, end);
     
-    /// 上传文件到指定 bucket
-    pub async fn upload_file(
-        &self,
-        bucket: &str,
-        key: &str,
-        data: Vec<u8>,
-        content_type: &str,
-    ) -> Result<String, anyhow::Error>
+    // 获取分片URL
+    const { part_url } = await fetch(
+      `/api/storage/multipart/part-url?file_key=${file_key}&upload_id=${multipart_upload_id}&part_number=${i + 1}`,
+      { headers: { 'Authorization': `Bearer ${accessToken}` } }
+    ).then(r => r.json());
     
-    /// 上传头像（便捷方法）
-    pub async fn upload_avatar(
-        &self,
-        user_id: &str,
-        data: Vec<u8>,
-        extension: &str,
-    ) -> Result<String, anyhow::Error>
-    
-    /// 删除文件
-    pub async fn delete_file(&self, bucket: &str, key: &str) -> Result<(), anyhow::Error>
+    // 上传分片
+    await fetch(part_url, {
+      method: 'PUT',
+      body: chunk,
+    });
+  }
+};
+```
+
+## 📡 API 接口
+
+### POST /api/storage/upload/request
+
+请求文件上传（需鉴权）
+
+**Request Body:**
+```json
+{
+  "file_type": "user_image",
+  "storage_location": "user_files",
+  "related_id": "friend_user_id",
+  "filename": "example.jpg",
+  "file_size": 1048576,
+  "content_type": "image/jpeg",
+  "file_hash": "abc123...",
+  "estimated_upload_time": 3600,
+  "force_upload": false
 }
 ```
 
-### S3Config (`config.rs`)
-
-配置结构体，从环境变量加载：
-
-```rust
-pub struct S3Config {
-    pub endpoint: String,           // MinIO 端点
-    pub access_key: String,         // 访问密钥
-    pub secret_key: String,         // 密钥
-    pub bucket_avatars: String,     // 头像 bucket 名称
-    pub public_url: String,         // 公开访问 URL
-    pub region: String,             // 区域
-}
-
-impl S3Config {
-    /// 从环境变量加载配置
-    pub fn from_env() -> Result<Self, String>
+**Response:**
+```json
+{
+  "mode": "one_time_token",
+  "preview_support": "inline_preview",
+  "upload_token": "token_xxx",
+  "upload_url": "http://localhost:8080/api/storage/upload/direct?token=xxx",
+  "expires_in": 900,
+  "file_key": "user_id/images/timestamp_hash_filename.jpg",
+  "max_file_size": 104857600,
+  "instant_upload": false,
+  "existing_file_url": null
 }
 ```
 
-### AvatarService (`services/avatar.rs`)
+### POST /api/storage/upload/direct?token={token}
 
-头像上传业务逻辑：
+直接上传文件（Token验证，无需access_token）
 
-```rust
-impl AvatarService {
-    /// 验证文件扩展名（仅允许：jpg, jpeg, png, gif, webp）
-    pub fn validate_extension(filename: &str) -> Result<String, String>
-    
-    /// 验证文件大小（最大 5MB）
-    pub fn validate_size(data: &[u8]) -> Result<(), String>
-    
-    /// 上传头像（包含验证）
-    pub async fn upload_avatar(
-        s3_client: &S3Client,
-        user_id: &str,
-        data: Vec<u8>,
-        filename: &str,
-    ) -> Result<String, anyhow::Error>
+**Request:** multipart/form-data
+- `file`: 文件数据
+
+**Response:**
+```json
+{
+  "file_url": "http://localhost:9000/user-file/...",
+  "file_key": "user_id/images/...",
+  "file_size": 1048576,
+  "content_type": "image/jpeg",
+  "preview_support": "inline_preview"
 }
 ```
 
-## 🔄 使用示例
+### GET /api/storage/multipart/part-url
 
-### 初始化客户端
+获取分片上传URL（需鉴权）
 
-```rust
-use huanvae_chat::storage::{S3Client, S3Config};
+**Query Parameters:**
+- `file_key`: 文件key
+- `upload_id`: 分片上传ID
+- `part_number`: 分片编号
 
-// 在 main.rs 中初始化
-let s3_config = S3Config::from_env()
-    .expect("Failed to load MinIO configuration");
-let s3_client = Arc::new(
-    S3Client::new(s3_config)
-        .await
-        .expect("Failed to initialize S3 client")
-);
-```
-
-### 上传头像
-
-```rust
-use huanvae_chat::storage::services::AvatarService;
-
-// 在 handler 中使用
-let avatar_url = AvatarService::upload_avatar(
-    &s3_client,
-    "user-123",
-    file_data,
-    "avatar.jpg"
-).await?;
-
-// 返回的 URL 格式：
-// http://localhost:9000/avatars/user-123.jpg
-```
-
-### 直接上传文件
-
-```rust
-let url = s3_client.upload_file(
-    "avatars",                    // bucket
-    "user-123.jpg",               // key
-    file_data,                    // data
-    "image/jpeg"                  // content-type
-).await?;
+**Response:**
+```json
+{
+  "part_url": "http://localhost:9000/...",
+  "part_number": 1,
+  "expires_in": 3600
+}
 ```
 
 ## 🔒 安全特性
 
-1. **文件类型验证**
-   - 头像仅允许：jpg, jpeg, png, gif, webp
-   - 通过文件扩展名验证
+1. **哈希验证**：服务端验证上传后的文件哈希与客户端提供的哈希是否匹配
+2. **大小验证**：验证实际上传的文件大小与声明的大小是否一致
+3. **一次性Token**：每个Token只能使用一次，使用后自动失效
+4. **权限验证**：好友文件需验证好友关系，群文件需验证群成员关系
+5. **时效控制**：
+   - 小文件（< 10MB）：5分钟
+   - 中等文件（10-100MB）：15分钟
+   - 大文件（1-10GB）：2小时
+   - 超大文件（> 10GB）：用户指定（最多7天）
+6. **自动清理**：定时清理过期的pending记录
 
-2. **文件大小限制**
-   - 头像最大 5MB
-   - 可根据业务需求调整
+## 📊 数据库设计
 
-3. **权限隔离**
-   - 头像 bucket 公开读取（便于直接访问）
-   - 其他 buckets 私有访问（需签名 URL）
+### file_records 表
 
-4. **路径规范**
-   - 头像：`{user_id}.{ext}`
-   - 防止路径遍历攻击
+存储所有文件的元数据记录。
 
-## 📝 初始化行为
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | UUID | 主键 |
+| file_key | VARCHAR(500) | 文件key（唯一） |
+| file_url | TEXT | 访问URL |
+| file_hash | VARCHAR(64) | SHA-256哈希 |
+| owner_id | VARCHAR(255) | 所有者ID |
+| file_size | BIGINT | 文件大小 |
+| status | VARCHAR(20) | 状态（pending/completed/failed） |
+| upload_token | VARCHAR(128) | 一次性上传Token |
+| preview_support | VARCHAR(20) | 预览支持 |
+| expires_at | TIMESTAMPTZ | 过期时间 |
 
-在应用启动时，`S3Client::new()` 会自动执行：
+### user_storage_quotas 表
 
-1. ✅ 创建 `avatars` bucket（如果不存在）
-2. ✅ 设置 `avatars` bucket 为公开读取
-3. ✅ 验证连接是否正常
+用户存储配额管理。
 
-如果初始化失败，应用将无法启动并输出错误日志。
-
-## 🚀 扩展指南
-
-### 添加新的文件类型支持
-
-1. 在 `services/` 中创建新的服务文件（如 `group_file.rs`）
-2. 实现验证和上传逻辑
-3. 在 `client.rs` 中添加便捷方法（可选）
-4. 更新 `services/mod.rs` 导出
-
-### 添加新的 Bucket
-
-1. 在 `S3Config` 中添加 bucket 名称字段
-2. 在 `S3Client::init_buckets()` 中创建 bucket
-3. 根据需求设置 bucket 权限策略
-
-## 🔗 依赖
-
-```toml
-aws-sdk-s3 = "1.115.0"
-aws-config = "1.8.11"
-aws-credential-types = "1.2.10"
-```
-
-使用 AWS SDK for Rust 来与 MinIO 交互（MinIO 完全兼容 S3 API）。
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| user_id | VARCHAR(255) | 用户ID |
+| total_quota | BIGINT | 总配额（默认10GB） |
+| used_space | BIGINT | 已使用空间 |
+| file_count | INTEGER | 文件数量 |
 
 ## 🎯 设计原则
 
-- **简单易用**：提供高层次的便捷方法
-- **类型安全**：利用 Rust 类型系统保证正确性
-- **错误处理**：使用 `anyhow::Error` 统一错误类型
-- **异步优先**：所有 IO 操作使用 `async/await`
-- **可测试性**：业务逻辑与存储层分离
+- **直连上传**：大文件直连MinIO，不占用后端带宽
+- **安全可控**：多重验证确保文件安全
+- **高性能**：秒传、去重节省带宽和存储
+- **易扩展**：模块化设计，易于添加新功能
+- **类型安全**：充分利用Rust类型系统
+
+## 📚 相关文档
+
+- [MinIO数据结构规范](../../MinIO/data.md)
+- [数据库迁移](../../PostgreSQL/init/05_file_records.sql)
 

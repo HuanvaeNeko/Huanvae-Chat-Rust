@@ -21,7 +21,7 @@ use huanvae_chat::friends_messages::{
     handlers::{create_messages_routes, MessagesState},
 };
 use huanvae_chat::profile::handlers::routes::profile_routes;
-use huanvae_chat::storage::{S3Client, S3Config};
+use huanvae_chat::storage::{create_storage_routes, S3Client, S3Config};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -104,6 +104,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let friends_state = FriendsState::new(db.clone());
     let messages_state = MessagesState::new(db.clone());
 
+    // 获取API基础URL
+    let api_base_url = std::env::var("APP_BASE_URL")
+        .unwrap_or_else(|_| "http://localhost:8080".to_string());
+
     // 7. 创建路由
     let app = Router::new()
         // 健康检查
@@ -139,6 +143,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         // 个人资料路由
         .merge(profile_routes(db.clone(), s3_client.clone(), auth_state.clone()))
+        // 文件存储路由
+        .nest(
+            "/api/storage",
+            create_storage_routes(db.clone(), s3_client.clone(), auth_state.clone(), api_base_url),
+        )
         // CORS 中间件
         .layer(
             tower_http::cors::CorsLayer::new()
@@ -178,6 +187,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("  GET  /api/messages                 - 获取消息列表");
     tracing::info!("  DELETE /api/messages/delete        - 删除消息");
     tracing::info!("  POST /api/messages/recall          - 撤回消息");
+    tracing::info!("  POST /api/storage/upload/request   - 请求文件上传");
+    tracing::info!("  POST /api/storage/upload/direct    - 直接上传文件");
+    tracing::info!("  GET  /api/storage/multipart/part-url - 获取分片URL");
 
     axum::serve(listener, app).await?;
 

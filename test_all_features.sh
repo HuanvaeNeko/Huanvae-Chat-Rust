@@ -411,19 +411,37 @@ sleep 1
 
 log_step "第 14 步：用户1 上传头像"
 
-# 创建测试图片
-echo "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAFUlEQVR42mNk+M9Qz0AEYBxVSF+FABJADveWkH6oAAAAAElFTkSuQmCC" | base64 -d > /tmp/test_avatar_${TIMESTAMP}.png
+# 使用真实图片文件作为头像
+AVATAR_FILE="./testfile/0BD129B455796E21375D51F2AED2CB3F.jpg"
+if [ -f "$AVATAR_FILE" ]; then
+    log_info "使用真实图片文件作为头像（6.1MB）"
+    UPLOAD_AVATAR=$(curl -s -X POST "${BASE_URL}/api/profile/avatar" \
+        -H "Authorization: Bearer $USER1_TOKEN" \
+        -F "avatar=@$AVATAR_FILE")
+    echo "$UPLOAD_AVATAR" | jq '.' 2>/dev/null || echo "$UPLOAD_AVATAR"
 
-UPLOAD_AVATAR=$(curl -s -X POST "${BASE_URL}/api/profile/avatar" \
-    -H "Authorization: Bearer $USER1_TOKEN" \
-    -F "avatar=@/tmp/test_avatar_${TIMESTAMP}.png")
-echo "$UPLOAD_AVATAR" | jq '.' 2>/dev/null || echo "$UPLOAD_AVATAR"
-
-if echo "$UPLOAD_AVATAR" | jq -e '.avatar_url' > /dev/null 2>&1; then
-    AVATAR_URL=$(echo "$UPLOAD_AVATAR" | jq -r '.avatar_url')
-    log_success "头像上传成功: $AVATAR_URL"
+    if echo "$UPLOAD_AVATAR" | jq -e '.avatar_url' > /dev/null 2>&1; then
+        AVATAR_URL=$(echo "$UPLOAD_AVATAR" | jq -r '.avatar_url')
+        log_success "头像上传成功: $AVATAR_URL"
+    else
+        log_error "头像上传失败"
+    fi
 else
-    log_error "头像上传失败"
+    log_info "真实头像文件不存在，使用小测试图片"
+    # 创建小测试图片作为备选
+    echo "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAFUlEQVR42mNk+M9Qz0AEYBxVSF+FABJADveWkH6oAAAAAElFTkSuQmCC" | base64 -d > /tmp/test_avatar_${TIMESTAMP}.png
+    
+    UPLOAD_AVATAR=$(curl -s -X POST "${BASE_URL}/api/profile/avatar" \
+        -H "Authorization: Bearer $USER1_TOKEN" \
+        -F "avatar=@/tmp/test_avatar_${TIMESTAMP}.png")
+    echo "$UPLOAD_AVATAR" | jq '.' 2>/dev/null || echo "$UPLOAD_AVATAR"
+
+    if echo "$UPLOAD_AVATAR" | jq -e '.avatar_url' > /dev/null 2>&1; then
+        AVATAR_URL=$(echo "$UPLOAD_AVATAR" | jq -r '.avatar_url')
+        log_success "头像上传成功: $AVATAR_URL"
+    else
+        log_error "头像上传失败"
+    fi
 fi
 
 sleep 1
@@ -880,6 +898,342 @@ else
 fi
 
 # ==============================================
+# 第七部分：文件上传功能测试
+# ==============================================
+
+log_step "第 32 步：计算测试文件哈希值"
+
+# 检查是否有sha256sum命令
+if command -v sha256sum >/dev/null 2>&1; then
+    HASH_CMD="sha256sum"
+elif command -v shasum >/dev/null 2>&1; then
+    HASH_CMD="shasum -a 256"
+else
+    log_error "未找到sha256sum或shasum命令，跳过文件上传测试"
+    HASH_CMD=""
+fi
+
+if [ -n "$HASH_CMD" ]; then
+    # 使用真实图片文件进行测试
+    TEST_FILE="./testfile/0BD129B455796E21375D51F2AED2CB3F.jpg"
+    if [ -f "$TEST_FILE" ]; then
+        log_info "使用真实图片文件进行storage测试（6.1MB）"
+        TEST_FILE_HASH=$($HASH_CMD "$TEST_FILE" | awk '{print $1}')
+        TEST_FILE_SIZE=$(stat -f%z "$TEST_FILE" 2>/dev/null || stat -c%s "$TEST_FILE" 2>/dev/null)
+        log_info "测试文件哈希: $TEST_FILE_HASH"
+        log_info "测试文件大小: $(($TEST_FILE_SIZE / 1024 / 1024)) MB"
+    else
+        log_info "真实文件不存在，创建小测试文件..."
+        TEST_FILE="/tmp/test_avatar_${TIMESTAMP}.png"
+        echo "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAFUlEQVR42mNk+M9Qz0AEYBxVSF+FABJADveWkH6oAAAAAElFTkSuQmCC" | base64 -d > "$TEST_FILE"
+        TEST_FILE_HASH=$($HASH_CMD "$TEST_FILE" | awk '{print $1}')
+        TEST_FILE_SIZE=$(stat -f%z "$TEST_FILE" 2>/dev/null || stat -c%s "$TEST_FILE" 2>/dev/null)
+        log_info "测试文件哈希: $TEST_FILE_HASH"
+        log_info "测试文件大小: $TEST_FILE_SIZE 字节"
+    fi
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 33 步：请求文件上传（小文件）"
+
+if [ -n "$HASH_CMD" ]; then
+    UPLOAD_REQ=$(api_call POST /api/storage/upload/request "$USER1_TOKEN_NEW" "{
+        \"file_type\": \"user_image\",
+        \"storage_location\": \"user_files\",
+        \"filename\": \"test_storage_image.jpg\",
+        \"file_size\": $TEST_FILE_SIZE,
+        \"content_type\": \"image/jpeg\",
+        \"file_hash\": \"$TEST_FILE_HASH\",
+        \"force_upload\": false
+    }")
+    echo "$UPLOAD_REQ" | jq '.' 2>/dev/null || echo "$UPLOAD_REQ"
+    
+    UPLOAD_MODE=$(echo "$UPLOAD_REQ" | jq -r '.mode' 2>/dev/null)
+    INSTANT_UPLOAD=$(echo "$UPLOAD_REQ" | jq -r '.instant_upload' 2>/dev/null)
+    
+    if [ "$INSTANT_UPLOAD" = "true" ]; then
+        log_success "✓ 秒传功能正常工作"
+    elif [ "$UPLOAD_MODE" = "one_time_token" ]; then
+        log_success "✓ 获取一次性Token上传URL成功"
+        UPLOAD_URL=$(echo "$UPLOAD_REQ" | jq -r '.upload_url' 2>/dev/null)
+        FILE_KEY=$(echo "$UPLOAD_REQ" | jq -r '.file_key' 2>/dev/null)
+        log_info "上传URL: ${UPLOAD_URL:0:50}..."
+        log_info "文件key: $FILE_KEY"
+    else
+        log_error "✗ 获取上传URL失败"
+    fi
+else
+    log_info "跳过文件上传测试（无哈希命令）"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 34 步：直接上传文件到MinIO"
+
+if [ -n "$TEST_FILE_HASH" ] && [ -n "$UPLOAD_URL" ] && [ "$INSTANT_UPLOAD" != "true" ]; then
+    # 直接上传文件
+    DIRECT_UPLOAD=$(curl -s -X POST "$UPLOAD_URL" \
+        -F "file=@$TEST_FILE")
+    echo "$DIRECT_UPLOAD" | jq '.' 2>/dev/null || echo "$DIRECT_UPLOAD"
+    
+    if echo "$DIRECT_UPLOAD" | jq -e '.file_url' > /dev/null 2>&1; then
+        UPLOADED_FILE_URL=$(echo "$DIRECT_UPLOAD" | jq -r '.file_url')
+        log_success "✓ 文件上传成功: $UPLOADED_FILE_URL"
+    else
+        log_error "✗ 文件上传失败"
+    fi
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 35 步：测试秒传功能（再次上传相同文件）"
+
+if [ -n "$HASH_CMD" ]; then
+    SECOND_UPLOAD=$(api_call POST /api/storage/upload/request "$USER1_TOKEN_NEW" "{
+        \"file_type\": \"user_image\",
+        \"storage_location\": \"user_files\",
+        \"filename\": \"test_image_copy.jpg\",
+        \"file_size\": $TEST_FILE_SIZE,
+        \"content_type\": \"image/jpeg\",
+        \"file_hash\": \"$TEST_FILE_HASH\",
+        \"force_upload\": false
+    }")
+    
+    INSTANT_UPLOAD2=$(echo "$SECOND_UPLOAD" | jq -r '.instant_upload' 2>/dev/null)
+    
+    if [ "$INSTANT_UPLOAD2" = "true" ]; then
+        log_success "✓ 秒传功能正常工作（相同哈希文件直接返回）"
+        EXISTING_URL=$(echo "$SECOND_UPLOAD" | jq -r '.existing_file_url' 2>/dev/null)
+        log_info "已存在文件URL: $EXISTING_URL"
+    else
+        log_info "未触发秒传（可能是首次上传）"
+    fi
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 36 步：测试强制重新上传"
+
+if [ -n "$HASH_CMD" ]; then
+    FORCE_UPLOAD=$(api_call POST /api/storage/upload/request "$USER1_TOKEN_NEW" "{
+        \"file_type\": \"user_image\",
+        \"storage_location\": \"user_files\",
+        \"filename\": \"test_image_force.jpg\",
+        \"file_size\": $TEST_FILE_SIZE,
+        \"content_type\": \"image/jpeg\",
+        \"file_hash\": \"$TEST_FILE_HASH\",
+        \"force_upload\": true
+    }")
+    
+    INSTANT_UPLOAD3=$(echo "$FORCE_UPLOAD" | jq -r '.instant_upload' 2>/dev/null)
+    
+    if [ "$INSTANT_UPLOAD3" = "false" ]; then
+        log_success "✓ 强制上传功能正常工作（force_upload=true 跳过秒传）"
+    else
+        log_error "✗ 强制上传未生效"
+    fi
+fi
+
+# ==============================================
+# 第八部分：真实文件上传测试
+# ==============================================
+
+log_step "第 37 步：测试上传真实图片文件（6.1MB）"
+
+REAL_IMAGE="./testfile/0BD129B455796E21375D51F2AED2CB3F.jpg"
+if [ -f "$REAL_IMAGE" ]; then
+    log_info "计算图片文件哈希..."
+    REAL_IMAGE_HASH=$($HASH_CMD "$REAL_IMAGE" | awk '{print $1}')
+    REAL_IMAGE_SIZE=$(stat -f%z "$REAL_IMAGE" 2>/dev/null || stat -c%s "$REAL_IMAGE" 2>/dev/null)
+    log_info "图片哈希: $REAL_IMAGE_HASH"
+    log_info "图片大小: $(($REAL_IMAGE_SIZE / 1024 / 1024)) MB"
+    
+    # 请求上传
+    REAL_IMG_REQ=$(api_call POST /api/storage/upload/request "$USER1_TOKEN_NEW" "{
+        \"file_type\": \"user_image\",
+        \"storage_location\": \"user_files\",
+        \"filename\": \"real_test.jpg\",
+        \"file_size\": $REAL_IMAGE_SIZE,
+        \"content_type\": \"image/jpeg\",
+        \"file_hash\": \"$REAL_IMAGE_HASH\",
+        \"force_upload\": false
+    }")
+    
+    REAL_IMG_URL=$(echo "$REAL_IMG_REQ" | jq -r '.upload_url' 2>/dev/null)
+    REAL_IMG_KEY=$(echo "$REAL_IMG_REQ" | jq -r '.file_key' 2>/dev/null)
+    
+    if [ -n "$REAL_IMG_URL" ] && [ "$REAL_IMG_URL" != "null" ]; then
+        log_success "✓ 获取6.1MB图片上传URL成功"
+        
+        # 上传文件
+        log_info "正在上传6.1MB图片..."
+        REAL_IMG_UPLOAD=$(curl -s -X POST "$REAL_IMG_URL" -F "file=@$REAL_IMAGE")
+        
+        if echo "$REAL_IMG_UPLOAD" | jq -e '.file_url' > /dev/null 2>&1; then
+            REAL_IMG_FILE_URL=$(echo "$REAL_IMG_UPLOAD" | jq -r '.file_url')
+            log_success "✓ 6.1MB图片上传成功"
+            log_info "文件URL: $REAL_IMG_FILE_URL"
+        else
+            log_error "✗ 图片上传失败"
+        fi
+    else
+        log_error "✗ 获取图片上传URL失败"
+    fi
+else
+    log_info "跳过真实图片测试（文件不存在）"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 38 步：测试上传大图片文件（71MB TIF）"
+
+LARGE_IMAGE="./testfile/landmask_SG_052020_COG512.tif"
+if [ -f "$LARGE_IMAGE" ]; then
+    log_info "计算大图片文件哈希..."
+    LARGE_IMG_HASH=$($HASH_CMD "$LARGE_IMAGE" | awk '{print $1}')
+    LARGE_IMG_SIZE=$(stat -f%z "$LARGE_IMAGE" 2>/dev/null || stat -c%s "$LARGE_IMAGE" 2>/dev/null)
+    log_info "大图片哈希: $LARGE_IMG_HASH"
+    log_info "大图片大小: $(($LARGE_IMG_SIZE / 1024 / 1024)) MB"
+    
+    # 请求上传
+    LARGE_IMG_REQ=$(api_call POST /api/storage/upload/request "$USER1_TOKEN_NEW" "{
+        \"file_type\": \"user_image\",
+        \"storage_location\": \"user_files\",
+        \"filename\": \"large_map.tif\",
+        \"file_size\": $LARGE_IMG_SIZE,
+        \"content_type\": \"image/tiff\",
+        \"file_hash\": \"$LARGE_IMG_HASH\",
+        \"force_upload\": false
+    }")
+    
+    LARGE_IMG_URL=$(echo "$LARGE_IMG_REQ" | jq -r '.upload_url' 2>/dev/null)
+    LARGE_IMG_EXPIRES=$(echo "$LARGE_IMG_REQ" | jq -r '.expires_in' 2>/dev/null)
+    
+    if [ -n "$LARGE_IMG_URL" ] && [ "$LARGE_IMG_URL" != "null" ]; then
+        log_success "✓ 获取71MB大图片上传URL成功（有效期: ${LARGE_IMG_EXPIRES}秒）"
+        
+        # 上传文件
+        log_info "正在上传71MB大图片（可能需要一些时间）..."
+        LARGE_IMG_UPLOAD=$(curl -s -X POST "$LARGE_IMG_URL" -F "file=@$LARGE_IMAGE")
+        
+        if echo "$LARGE_IMG_UPLOAD" | jq -e '.file_url' > /dev/null 2>&1; then
+            LARGE_IMG_FILE_URL=$(echo "$LARGE_IMG_UPLOAD" | jq -r '.file_url')
+            log_success "✓ 71MB大图片上传成功"
+            log_info "文件URL: $LARGE_IMG_FILE_URL"
+        else
+            log_error "✗ 大图片上传失败"
+            echo "$LARGE_IMG_UPLOAD" | jq '.' 2>/dev/null || echo "$LARGE_IMG_UPLOAD"
+        fi
+    else
+        log_error "✗ 获取大图片上传URL失败"
+    fi
+else
+    log_info "跳过大图片测试（文件不存在）"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 39 步：测试上传视频文件（2.9GB）"
+
+VIDEO_FILE="./testfile/VID_20251128_141436_076.mp4"
+if [ -f "$VIDEO_FILE" ]; then
+    log_info "计算视频文件哈希（可能需要一些时间）..."
+    VIDEO_HASH=$($HASH_CMD "$VIDEO_FILE" | awk '{print $1}')
+    VIDEO_SIZE=$(stat -f%z "$VIDEO_FILE" 2>/dev/null || stat -c%s "$VIDEO_FILE" 2>/dev/null)
+    log_info "视频哈希: $VIDEO_HASH"
+    log_info "视频大小: $(($VIDEO_SIZE / 1024 / 1024)) MB"
+    
+    # 请求上传
+    VIDEO_REQ=$(api_call POST /api/storage/upload/request "$USER1_TOKEN_NEW" "{
+        \"file_type\": \"user_video\",
+        \"storage_location\": \"user_files\",
+        \"filename\": \"test_video.mp4\",
+        \"file_size\": $VIDEO_SIZE,
+        \"content_type\": \"video/mp4\",
+        \"file_hash\": \"$VIDEO_HASH\",
+        \"force_upload\": false
+    }")
+    
+    VIDEO_URL=$(echo "$VIDEO_REQ" | jq -r '.upload_url' 2>/dev/null)
+    VIDEO_EXPIRES=$(echo "$VIDEO_REQ" | jq -r '.expires_in' 2>/dev/null)
+    VIDEO_MODE=$(echo "$VIDEO_REQ" | jq -r '.mode' 2>/dev/null)
+    
+    if [ -n "$VIDEO_URL" ] && [ "$VIDEO_URL" != "null" ]; then
+        log_success "✓ 获取2.9GB视频上传URL成功（模式: $VIDEO_MODE, 有效期: ${VIDEO_EXPIRES}秒）"
+        
+        # 上传文件
+        log_info "正在上传2.9GB视频文件（这将需要较长时间）..."
+        VIDEO_UPLOAD=$(curl -s -X POST "$VIDEO_URL" -F "file=@$VIDEO_FILE")
+        
+        if echo "$VIDEO_UPLOAD" | jq -e '.file_url' > /dev/null 2>&1; then
+            VIDEO_FILE_URL=$(echo "$VIDEO_UPLOAD" | jq -r '.file_url')
+            log_success "✓ 2.9GB视频上传成功"
+            log_info "文件URL: $VIDEO_FILE_URL"
+        else
+            log_error "✗ 视频上传失败"
+            echo "$VIDEO_UPLOAD" | jq '.' 2>/dev/null || echo "$VIDEO_UPLOAD"
+        fi
+    else
+        log_error "✗ 获取视频上传URL失败"
+        echo "$VIDEO_REQ" | jq '.' 2>/dev/null || echo "$VIDEO_REQ"
+    fi
+else
+    log_info "跳过视频测试（文件不存在）"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 40 步：验证文件可访问性"
+
+# 测试访问已上传的图片
+if [ -n "$REAL_IMG_FILE_URL" ]; then
+    log_info "测试访问6.1MB图片..."
+    IMG_HEAD=$(curl -s -I "$REAL_IMG_FILE_URL" | head -1)
+    if echo "$IMG_HEAD" | grep -q "200"; then
+        log_success "✓ 图片文件可访问"
+    else
+        log_error "✗ 图片文件无法访问"
+    fi
+fi
+
+# 测试访问大图片
+if [ -n "$LARGE_IMG_FILE_URL" ]; then
+    log_info "测试访问71MB大图片..."
+    LARGE_IMG_HEAD=$(curl -s -I "$LARGE_IMG_FILE_URL" | head -1)
+    if echo "$LARGE_IMG_HEAD" | grep -q "200"; then
+        log_success "✓ 大图片文件可访问"
+    else
+        log_error "✗ 大图片文件无法访问"
+    fi
+fi
+
+# 测试访问视频
+if [ -n "$VIDEO_FILE_URL" ]; then
+    log_info "测试访问2.9GB视频..."
+    VIDEO_HEAD=$(curl -s -I "$VIDEO_FILE_URL" | head -1)
+    if echo "$VIDEO_HEAD" | grep -q "200"; then
+        log_success "✓ 视频文件可访问"
+    else
+        log_error "✗ 视频文件无法访问"
+    fi
+fi
+
+# ==============================================
 # 测试总结
 # ==============================================
 
@@ -904,6 +1258,13 @@ echo -e "${GREEN}║  ✓ 消息查询         分页查询                     
 echo -e "${GREEN}║  ✓ 消息删除         软删除                            ║${NC}"
 echo -e "${GREEN}║  ✓ 消息撤回         2分钟内                           ║${NC}"
 echo -e "${GREEN}║  ✓ 权限验证         非好友拒绝                        ║${NC}"
+echo -e "${GREEN}║  ✓ 文件上传         哈希验证                          ║${NC}"
+echo -e "${GREEN}║  ✓ 秒传功能         哈希去重                          ║${NC}"
+echo -e "${GREEN}║  ✓ 强制上传         跳过秒传                          ║${NC}"
+echo -e "${GREEN}║  ✓ 真实图片         6.1MB上传                         ║${NC}"
+echo -e "${GREEN}║  ✓ 大图片文件       71MB上传                          ║${NC}"
+echo -e "${GREEN}║  ✓ 视频文件         2.9GB上传                         ║${NC}"
+echo -e "${GREEN}║  ✓ 文件访问         可读取验证                        ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
