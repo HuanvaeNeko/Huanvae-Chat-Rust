@@ -59,3 +59,25 @@ pub struct ExistingFileInfo {
     pub content_type: String,
 }
 
+/// 预签名URL响应
+#[derive(Debug, Serialize)]
+pub struct PresignedUrlResponse {
+    /// 预签名URL（直连MinIO）
+    pub presigned_url: String,
+    
+    /// 过期时间（ISO 8601格式）
+    pub expires_at: String,
+    
+    /// 文件UUID
+    pub file_uuid: String,
+    
+    /// 文件大小
+    pub file_size: i64,
+    
+    /// 文件类型
+    pub content_type: String,
+    
+    /// 警告信息（可选）
+    pub warning: Option<String>,
+}
+

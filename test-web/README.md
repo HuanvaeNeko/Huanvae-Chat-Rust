@@ -187,12 +187,11 @@ POST   /api/messages/recall   - 撤回消息
 - ✅ 文件上传进度显示
 - ✅ 秒传功能标识（⚡图标）
 - ✅ **图片在线预览（支持UUID访问权限验证）**
-- ✅ **视频真正流式播放（通过Service Worker实现）**
+- ✅ **视频在线播放（支持UUID访问流式加载）**
 - ✅ **PDF在线查看（支持UUID访问）**
-- ✅ **UUID文件自动类型检测（通过文件名后缀）**
+- ✅ **UUID文件自动类型检测（通过Content-Type）**
 - ✅ **授权下载功能（UUID文件需要Bearer Token）**
 - ✅ **已上传文件列表管理**
-- ✅ **Service Worker代理（支持视频流式Range请求）**
 
 ## 📦 文件存储功能说明
 
@@ -213,24 +212,61 @@ POST   /api/messages/recall   - 撤回消息
 - **秒传支持**: 相同文件的采样哈希相同，仍然可以实现秒传
 - **服务端验证**: 采样哈希仅用于去重检查，不做完整性验证（大文件场景下可接受）
 
-### 文件下载与预览
+### 文件下载与预览（预签名URL机制）
+
+#### 工作流程
+1. **获取预签名URL**：
+   - 前端通过UUID请求预签名URL
+   - 后端验证权限后生成MinIO直连URL
+   - 普通文件（< 15GB）：3小时有效期
+   - 超大文件（≥ 15GB）：用户指定时间（3小时-7天）
+
+2. **智能缓存**：
+   - 前端缓存预签名URL，避免重复请求
+   - 过期前5分钟自动提醒刷新
+   - 缓存结构：`{ uuid: { url, expiresAt } }`
+
+3. **文件类型判断**：
+   - 根据文件名后缀判断类型
+   - 支持：图片、视频、PDF、其他文件
+
+4. **预览方式**：
+   - **图片**：直接使用预签名URL作为img src
+   - **视频**：使用预签名URL作为video src
+     - ✅ 真正的流式播放
+     - ✅ 支持拖动进度条
+     - ✅ 支持Range请求
+   - **PDF**：使用预签名URL作为iframe src
+   - **其他**：提供下载链接
+
+5. **超大文件特殊处理**：
+   - 检测文件大小 > 15GB
+   - 弹窗提示用户输入预计下载时间
+   - 生成扩展有效期的预签名URL
+
+#### 优势对比
+
+| 特性 | 旧方案 (Bearer Token) | 新方案 (预签名URL) |
+|------|----------------------|-------------------|
+| **视频流式播放** | ❌ 需完整下载 | ✅ 真正流式，可拖动 |
+| **后端压力** | ⚠️ 所有流量经过后端 | ✅ 直连MinIO |
+| **浏览器缓存** | ❌ Blob URL不可缓存 | ✅ 可缓存 |
+| **Range请求** | ❌ 不支持 | ✅ 支持 |
+| **代码复杂度** | 较复杂（60-70行/函数） | 较简单（15-25行/函数） |
+| **安全性** | ✅ 实时权限验证 | ⚠️ 时效性权限（过期前有效）|
 1. **智能类型检测**: 
-   - 根据文件名后缀自动判断文件类型
-   - 无需额外的HEAD请求，速度更快
+   - UUID访问的文件自动发送HEAD请求获取Content-Type
+   - 根据文件类型自动选择预览或下载方式
    
 2. **图片预览**:
    - 支持 jpg, jpeg, png, gif, webp 格式
    - UUID文件通过Bearer Token认证后加载
    - 普通URL直接预览
    
-3. **视频播放**（🚀 真正的流式播放）:
+3. **视频播放**:
    - 支持 mp4, webm, ogg, mov 格式
-   - **使用Service Worker代理技术**
-   - **边看边加载，无需等待完整下载**
-   - 支持拖动进度条立即响应（真正的Range请求）
-   - 支持快进/快退
-   - 节省流量和内存
-   - 大视频（3GB+）也能流畅播放
+   - UUID文件支持流式播放（可拖动进度条）
+   - 大视频（>100MB）显示加载提示
    
 4. **PDF查看**:
    - 内嵌iframe预览
@@ -240,47 +276,6 @@ POST   /api/messages/recall   - 撤回消息
    - UUID文件使用`downloadUuidFile()`函数，自动添加Authorization头
    - 下载时显示进度提示
    - 支持自定义文件名
-
-### Service Worker 流式播放技术
-
-**工作原理**：
-```
-1. 页面加载时自动注册Service Worker (sw.js)
-2. Service Worker拦截所有 /api/storage/file/ 请求
-3. 在请求中自动注入Authorization头
-4. video标签可以直接使用UUID URL
-5. 浏览器发送Range请求 → Service Worker代理 → 服务器返回部分数据
-6. 实现真正的边看边加载
-```
-
-**优势**：
-- ✅ **真正的流式播放**：浏览器原生Range请求支持
-- ✅ **无需完整下载**：只下载当前播放的片段
-- ✅ **拖动进度条立即响应**：跳到任意位置立即开始加载
-- ✅ **节省流量**：只加载观看的部分
-- ✅ **节省内存**：不需要将整个文件加载到内存
-- ✅ **支持大文件**：3GB+视频也能流畅播放
-
-**技术细节**：
-```javascript
-// Service Worker (sw.js)
-self.addEventListener('fetch', (event) => {
-  if (url.pathname.startsWith('/api/storage/file/')) {
-    // 拦截请求并注入Authorization
-    const authenticatedRequest = new Request(request, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    });
-    event.respondWith(fetch(authenticatedRequest));
-  }
-});
-```
-
-**浏览器要求**：
-- ✅ 支持Service Worker（所有现代浏览器）
-- ✅ HTTPS或localhost（本地开发无需HTTPS）
-- ✅ 不支持IE浏览器
 
 ### UUID访问机制
 - 所有通过 `/api/storage/file/{uuid}` 访问的文件需要Bearer Token

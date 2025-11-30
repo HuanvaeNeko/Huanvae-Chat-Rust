@@ -286,17 +286,69 @@ const uploadLargeFile = async (file) => {
 }
 ```
 
-### GET /api/storage/file/{uuid}
+### POST /api/storage/file/{uuid}/presigned-url
 
-通过UUID访问文件（需鉴权）
+生成文件预签名下载URL（普通文件，3小时有效）
 
 **Headers:**
 - `Authorization: Bearer {access_token}`
 
+**Request Body:**
+```json
+{
+  "operation": "download",
+  "expires_in": 10800  // 可选，默认3小时（10800秒），最大3小时
+}
+```
+
 **Response:**
-- 成功：返回文件流（200 OK）
-- 无权限：403 Forbidden
-- 不存在：404 Not Found
+```json
+{
+  "presigned_url": "http://localhost:9000/user-file/xxx?X-Amz-Signature=...",
+  "expires_at": "2025-11-30T23:59:59Z",
+  "file_uuid": "d2f612d5-70b0-4d4e-8779-86cf6aeb2b30",
+  "file_size": 1048576,
+  "content_type": "image/jpeg"
+}
+```
+
+**说明**：
+- 通过UUID获取文件的预签名下载URL
+- 验证用户权限（file_access_permissions表）
+- 普通文件固定3小时有效期
+- 前端应缓存预签名URL，避免重复请求
+
+### POST /api/storage/file/{uuid}/presigned-url/extended
+
+生成文件预签名下载URL（超大文件，自定义有效期）
+
+**Headers:**
+- `Authorization: Bearer {access_token}`
+
+**Request Body:**
+```json
+{
+  "operation": "download",
+  "estimated_download_time": 86400  // 必填，预计下载时间（秒），如24小时
+}
+```
+
+**Response:**
+```json
+{
+  "presigned_url": "http://localhost:9000/user-file/xxx?X-Amz-Signature=...",
+  "expires_at": "2025-12-01T20:00:00Z",
+  "file_uuid": "...",
+  "file_size": 30000000000,
+  "content_type": "video/mp4",
+  "warning": "此链接将在24小时后过期"
+}
+```
+
+**说明**：
+- 用于超大文件（> 15GB）
+- 有效期：最少3小时（10800秒），最多7天（604800秒）
+- 前端需提示用户输入预计下载时间
 
 ### GET /api/storage/multipart/part-url
 
@@ -325,12 +377,18 @@ const uploadLargeFile = async (file) => {
 2. **大小验证**：验证实际上传的文件大小与声明的大小是否一致
 3. **一次性Token**：每个Token只能使用一次，使用后自动失效
 4. **权限验证**：好友文件需验证好友关系，群文件需验证群成员关系
-5. **时效控制**：
+5. **预签名URL安全**：
+   - 普通文件：3小时有效期
+   - 超大文件（> 15GB）：自定义有效期（3小时-7天）
+   - URL过期前5分钟前端自动提醒刷新
+   - 实时权限验证：生成URL前检查file_access_permissions表
+   - 时效性权限：URL在有效期内可用，无法中途撤销
+6. **时效控制**：
    - 小文件（< 10MB）：5分钟
    - 中等文件（10-100MB）：15分钟
    - 大文件（1-10GB）：2小时
    - 超大文件（> 10GB）：用户指定（最多7天）
-6. **自动清理**：定时清理过期的pending记录
+7. **自动清理**：定时清理过期的pending记录
 
 ## 📊 数据库设计
 

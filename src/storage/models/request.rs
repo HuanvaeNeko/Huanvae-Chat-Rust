@@ -53,3 +53,16 @@ pub struct MultipartPartRequest {
     pub part_number: i32,
 }
 
+/// 预签名URL请求（通过UUID访问）
+#[derive(Debug, Deserialize)]
+pub struct PresignedUrlRequest {
+    /// 操作类型：download 或 preview
+    pub operation: Option<String>,
+    
+    /// 有效期（秒），普通文件最长3小时
+    pub expires_in: Option<u32>,
+    
+    /// 预计下载时间（秒），仅超大文件需要
+    pub estimated_download_time: Option<u32>,
+}
+

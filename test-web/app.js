@@ -6,21 +6,18 @@ const state = {
   friendsBase: localStorage.getItem('friendsApiBase') || 'http://localhost:8080/api/friends',
   messagesBase: localStorage.getItem('messagesApiBase') || 'http://localhost:8080/api/messages',
   storageBase: localStorage.getItem('storageApiBase') || 'http://localhost:8080/api/storage',
+  accessToken: localStorage.getItem('accessToken') || '',
+  refreshToken: localStorage.getItem('refreshToken') || '',
   uploadedFiles: JSON.parse(localStorage.getItem('uploadedFiles') || '[]'),
+  presignedUrls: {}, // 缓存预签名URL: { uuid: { url, expiresAt } }
 };
 
-// 使用TokenManager管理token和Service Worker
-// tokenManager 在 token-manager.js 中定义，已作为全局变量可用
-
-async function init() {
+function init() {
   $('apiBase').value = state.apiBase;
   $('friendsApiBase').value = state.friendsBase;
   $('messagesApiBase').value = state.messagesBase;
   $('storageApiBase').value = state.storageBase;
   renderLocalState();
-  
-  // 初始化TokenManager（会自动注册Service Worker）
-  await tokenManager.initialize();
   $('saveBase').onclick = () => {
     state.apiBase = $('apiBase').value.trim() || state.apiBase;
     localStorage.setItem('apiBase', state.apiBase);
@@ -48,7 +45,10 @@ async function init() {
   $('btnRefreshToken').onclick = refreshAccessToken;
   $('btnListDevices').onclick = listDevices;
   $('btnClear').onclick = () => {
-    tokenManager.clearTokens();
+    state.accessToken = '';
+    state.refreshToken = '';
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
     renderLocalState();
     $('profile').textContent = '';
     $('devices').innerHTML = '';
@@ -127,14 +127,11 @@ async function login() {
     const data = await res.json();
     $('loginResult').textContent = pretty(data);
     if (res.ok && data.access_token && data.refresh_token) {
-      // 使用TokenManager设置tokens
-      await tokenManager.setTokens(data.access_token, data.refresh_token);
+      state.accessToken = data.access_token;
+      state.refreshToken = data.refresh_token;
+      localStorage.setItem('accessToken', state.accessToken);
+      localStorage.setItem('refreshToken', state.refreshToken);
       renderLocalState();
-      
-      // 提示用户Service Worker状态
-      if (!tokenManager.isServiceWorkerReady()) {
-        $('loginResult').textContent += '\n\n⚠️ 首次登录需要刷新页面以启用流式播放\n点击刷新按钮或按F5';
-      }
     }
   } catch (err) {
     $('loginResult').textContent = String(err);
@@ -152,7 +149,7 @@ function decodeJwt(token) {
 }
 
 function claimsFromToken() {
-  const c = decodeJwt(tokenManager.getAccessToken());
+  const c = decodeJwt(state.accessToken);
   return c || {};
 }
 
@@ -180,12 +177,11 @@ async function doJson(req, outId) {
 }
 
 function showProfileFromAccessToken() {
-  const accessToken = tokenManager.getAccessToken();
-  if (!accessToken) {
+  if (!state.accessToken) {
     $('profile').textContent = '未登录或缺少 access_token';
     return;
   }
-  const claims = decodeJwt(accessToken);
+  const claims = decodeJwt(state.accessToken);
   if (!claims) {
     $('profile').textContent = '无法解析 Access Token';
     return;
@@ -203,38 +199,54 @@ function showProfileFromAccessToken() {
 }
 
 async function refreshAccessToken() {
-  const refreshToken = tokenManager.getRefreshToken();
-  if (!refreshToken) {
-    $('profile').textContent = '缺少 refresh_token';
-    return;
+  if (!state.refreshToken) {
+    const error = '缺少 refresh_token';
+    if ($('profile')) $('profile').textContent = error;
+    throw new Error(error);
   }
+  
+  console.log('🔄 正在刷新Access Token...');
+  
   try {
     const res = await fetch(`${state.apiBase}/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: refreshToken }),
+      body: JSON.stringify({ refresh_token: state.refreshToken }),
     });
+    
     const data = await res.json();
+    
     if (res.ok && data.access_token) {
-      // 使用TokenManager更新token
-      await tokenManager.updateAccessToken(data.access_token);
-      $('profile').textContent = '已刷新 Access Token';
+      // 更新内存和localStorage
+      state.accessToken = data.access_token;
+      localStorage.setItem('accessToken', state.accessToken);
+      
+      if ($('profile')) $('profile').textContent = '✅ Access Token已刷新';
       renderLocalState();
+      
+      console.log('✅ Access Token刷新成功');
+      console.log('新Token过期时间:', new Date(decodeJwt(state.accessToken)?.exp * 1000).toISOString());
     } else {
-      $('profile').textContent = pretty(data);
+      const error = data.error || 'Token刷新失败';
+      console.error('❌ Token刷新失败:', error);
+      if ($('profile')) $('profile').textContent = pretty(data);
+      throw new Error(error);
     }
   } catch (err) {
-    $('profile').textContent = String(err);
+    const error = String(err);
+    console.error('❌ Token刷新异常:', error);
+    if ($('profile')) $('profile').textContent = error;
+    throw err;
   }
 }
 
 // Friends: list sent
 async function listSentRequests() {
-  if (!tokenManager.hasToken()) { $('sentResFmt').textContent = '未登录'; return; }
+  if (!state.accessToken) { $('sentResFmt').textContent = '未登录'; return; }
   const req = {
     method: 'GET',
     url: `${state.friendsBase}/requests/sent`,
-    headers: { 'Authorization': `Bearer ${tokenManager.getAccessToken()}` },
+    headers: { 'Authorization': `Bearer ${state.accessToken}` },
   };
   showRequest('sentReqFmt', req);
   const { ok, data } = await doJson(req, 'sentReqFmt');
@@ -255,11 +267,11 @@ function renderSentList(items) {
 
 // Friends: list pending
 async function listPendingRequests() {
-  if (!tokenManager.hasToken()) { $('pendingResFmt').textContent = '未登录'; return; }
+  if (!state.accessToken) { $('pendingResFmt').textContent = '未登录'; return; }
   const req = {
     method: 'GET',
     url: `${state.friendsBase}/requests/pending`,
-    headers: { 'Authorization': `Bearer ${tokenManager.getAccessToken()}` },
+    headers: { 'Authorization': `Bearer ${state.accessToken}` },
   };
   showRequest('pendingReqFmt', req);
   const { ok, data } = await doJson(req, 'pendingReqFmt');
@@ -304,11 +316,11 @@ function renderPendingList(items) {
 
 // Friends: list owned
 async function listFriends() {
-  if (!tokenManager.hasToken()) { $('friendsResFmt').textContent = '未登录'; return; }
+  if (!state.accessToken) { $('friendsResFmt').textContent = '未登录'; return; }
   const req = {
     method: 'GET',
     url: `${state.friendsBase}`,
-    headers: { 'Authorization': `Bearer ${tokenManager.getAccessToken()}` },
+    headers: { 'Authorization': `Bearer ${state.accessToken}` },
   };
   showRequest('friendsReqFmt', req);
   const { ok, data } = await doJson(req, 'friendsReqFmt');
@@ -341,7 +353,7 @@ function renderFriends(items) {
 
 // Friends: submit
 async function submitFriendRequest() {
-  if (!tokenManager.hasToken()) { $('submitResFmt').textContent = '未登录'; return; }
+  if (!state.accessToken) { $('submitResFmt').textContent = '未登录'; return; }
   const claims = claimsFromToken();
   const body = {
     user_id: claims.sub,
@@ -354,7 +366,7 @@ async function submitFriendRequest() {
   const req = {
     method: 'POST',
     url: `${state.friendsBase}/requests`,
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tokenManager.getAccessToken()}` },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.accessToken}` },
     body,
   };
   showRequest('submitReqFmt', req);
@@ -364,7 +376,7 @@ async function submitFriendRequest() {
 }
 
 async function removeFriend(friendId, reason) {
-  if (!tokenManager.hasToken()) { $('removeResFmt').textContent = '未登录'; return; }
+  if (!state.accessToken) { $('removeResFmt').textContent = '未登录'; return; }
   const claims = claimsFromToken();
   const body = {
     user_id: claims.sub,
@@ -375,7 +387,7 @@ async function removeFriend(friendId, reason) {
   const req = {
     method: 'POST',
     url: `${state.friendsBase}/remove`,
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tokenManager.getAccessToken()}` },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.accessToken}` },
     body,
   };
   showRequest('removeReqFmt', req);
@@ -386,7 +398,7 @@ async function removeFriend(friendId, reason) {
 
 // Friends: approve
 async function approveFriendRequest(pendingItem, reason) {
-  if (!tokenManager.hasToken()) { $('pendingResFmt').textContent = '未登录'; return; }
+  if (!state.accessToken) { $('pendingResFmt').textContent = '未登录'; return; }
   const claims = claimsFromToken();
   const body = {
     user_id: claims.sub,
@@ -397,7 +409,7 @@ async function approveFriendRequest(pendingItem, reason) {
   const req = {
     method: 'POST',
     url: `${state.friendsBase}/requests/approve`,
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tokenManager.getAccessToken()}` },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.accessToken}` },
     body,
   };
   showRequest('pendingReqFmt', req);
@@ -408,7 +420,7 @@ async function approveFriendRequest(pendingItem, reason) {
 
 // Friends: reject
 async function rejectFriendRequest(pendingItem, reason) {
-  if (!tokenManager.hasToken()) { $('pendingResFmt').textContent = '未登录'; return; }
+  if (!state.accessToken) { $('pendingResFmt').textContent = '未登录'; return; }
   const claims = claimsFromToken();
   const body = {
     user_id: claims.sub,
@@ -418,7 +430,7 @@ async function rejectFriendRequest(pendingItem, reason) {
   const req = {
     method: 'POST',
     url: `${state.friendsBase}/requests/reject`,
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tokenManager.getAccessToken()}` },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${state.accessToken}` },
     body,
   };
   showRequest('pendingReqFmt', req);
@@ -428,14 +440,14 @@ async function rejectFriendRequest(pendingItem, reason) {
 }
 
 async function listDevices() {
-  if (!tokenManager.hasToken()) {
+  if (!state.accessToken) {
     $('deviceResult').textContent = '未登录或缺少 access_token';
     return;
   }
   try {
     const res = await fetch(`${state.apiBase}/devices`, {
       method: 'GET',
-      headers: { 'Authorization': `Bearer ${tokenManager.getAccessToken()}` },
+      headers: { 'Authorization': `Bearer ${state.accessToken}` },
     });
     const data = await res.json();
     $('deviceResult').textContent = pretty(data);
@@ -465,11 +477,11 @@ function renderDevices(devices) {
 }
 
 async function deleteDevice(deviceId) {
-  if (!tokenManager.hasToken()) return;
+  if (!state.accessToken) return;
   try {
     const res = await fetch(`${state.apiBase}/devices/${encodeURIComponent(deviceId)}`, {
       method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${tokenManager.getAccessToken()}` },
+      headers: { 'Authorization': `Bearer ${state.accessToken}` },
     });
     const data = await res.json();
     $('deviceResult').textContent = pretty(data);
@@ -486,9 +498,8 @@ function renderLocalState() {
     apiBase: state.apiBase,
     friendsApiBase: state.friendsBase,
     messagesApiBase: state.messagesBase,
-    hasAccessToken: tokenManager.hasToken(),
-    hasRefreshToken: !!tokenManager.getRefreshToken(),
-    serviceWorkerReady: tokenManager.isServiceWorkerReady(),
+    hasAccessToken: !!state.accessToken,
+    hasRefreshToken: !!state.refreshToken,
   });
 }
 
@@ -498,7 +509,7 @@ function renderLocalState() {
 
 // Send message
 async function sendMessage() {
-  if (!tokenManager.hasToken()) { $('msgSendResFmt').textContent = '未登录'; return; }
+  if (!state.accessToken) { $('msgSendResFmt').textContent = '未登录'; return; }
   
   const body = {
     receiver_id: $('msg_receiver_id').value.trim(),
@@ -521,7 +532,7 @@ async function sendMessage() {
     url: state.messagesBase,
     headers: { 
       'Content-Type': 'application/json', 
-      'Authorization': `Bearer ${tokenManager.getAccessToken()}` 
+      'Authorization': `Bearer ${state.accessToken}` 
     },
     body,
   };
@@ -544,7 +555,7 @@ async function sendMessage() {
 
 // Get messages
 async function getMessages() {
-  if (!tokenManager.hasToken()) { $('msgGetResFmt').textContent = '未登录'; return; }
+  if (!state.accessToken) { $('msgGetResFmt').textContent = '未登录'; return; }
   
   const friendId = $('msg_friend_id').value.trim();
   const beforeUuid = $('msg_before_uuid').value.trim();
@@ -563,7 +574,7 @@ async function getMessages() {
   const req = {
     method: 'GET',
     url,
-    headers: { 'Authorization': `Bearer ${tokenManager.getAccessToken()}` },
+    headers: { 'Authorization': `Bearer ${state.accessToken}` },
   };
   showRequest('msgGetReqFmt', req);
   const { ok, data } = await doJson(req, 'msgGetReqFmt');
@@ -680,7 +691,7 @@ function renderMessages(messages, hasMore) {
 
 // Delete message
 async function deleteMessage(uuid) {
-  if (!tokenManager.hasToken()) { $('msgDeleteResFmt').textContent = '未登录'; return; }
+  if (!state.accessToken) { $('msgDeleteResFmt').textContent = '未登录'; return; }
   if (!uuid) { $('msgDeleteResFmt').textContent = '消息UUID必填'; return; }
 
   const req = {
@@ -688,7 +699,7 @@ async function deleteMessage(uuid) {
     url: `${state.messagesBase}/delete`,
     headers: { 
       'Content-Type': 'application/json', 
-      'Authorization': `Bearer ${tokenManager.getAccessToken()}` 
+      'Authorization': `Bearer ${state.accessToken}` 
     },
     body: { message_uuid: uuid },
   };
@@ -708,7 +719,7 @@ async function deleteMessage(uuid) {
 
 // Recall message
 async function recallMessage(uuid) {
-  if (!tokenManager.hasToken()) { $('msgRecallResFmt').textContent = '未登录'; return; }
+  if (!state.accessToken) { $('msgRecallResFmt').textContent = '未登录'; return; }
   if (!uuid) { $('msgRecallResFmt').textContent = '消息UUID必填'; return; }
 
   const req = {
@@ -716,7 +727,7 @@ async function recallMessage(uuid) {
     url: `${state.messagesBase}/recall`,
     headers: { 
       'Content-Type': 'application/json', 
-      'Authorization': `Bearer ${tokenManager.getAccessToken()}` 
+      'Authorization': `Bearer ${state.accessToken}` 
     },
     body: { message_uuid: uuid },
   };
@@ -736,8 +747,7 @@ async function recallMessage(uuid) {
 
 // ==================== Storage Functions ====================
 
-// 计算文件采样SHA-256哈希（适用于所有文件大小）
-// 采样策略：文件元信息 + 开头10MB + 中间10MB + 结尾10MB
+// 计算文件SHA-256哈希（采样策略，避免大文件内存溢出）
 async function calculateSHA256(file) {
   try {
     const SAMPLE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -750,37 +760,34 @@ async function calculateSHA256(file) {
     
     if (file.size <= SAMPLE_SIZE * 3) {
       // 小文件（< 30MB）：计算完整哈希
+      console.log('小文件，计算完整哈希');
       dataToHash = await file.arrayBuffer();
     } else {
       // 大文件：采样哈希策略
+      console.log('大文件，使用采样哈希策略');
       const chunks = [];
       
-      // 1. 读取开头10MB
+      // 读取开头10MB
       const startBlob = file.slice(0, SAMPLE_SIZE);
-      const startBuffer = await startBlob.arrayBuffer();
-      chunks.push(new Uint8Array(startBuffer));
+      chunks.push(new Uint8Array(await startBlob.arrayBuffer()));
       
-      // 2. 读取中间10MB
+      // 读取中间10MB
       const middleStart = Math.floor((file.size - SAMPLE_SIZE) / 2);
       const middleBlob = file.slice(middleStart, middleStart + SAMPLE_SIZE);
-      const middleBuffer = await middleBlob.arrayBuffer();
-      chunks.push(new Uint8Array(middleBuffer));
+      chunks.push(new Uint8Array(await middleBlob.arrayBuffer()));
       
-      // 3. 读取结尾10MB
+      // 读取结尾10MB
       const endBlob = file.slice(file.size - SAMPLE_SIZE, file.size);
-      const endBuffer = await endBlob.arrayBuffer();
-      chunks.push(new Uint8Array(endBuffer));
+      chunks.push(new Uint8Array(await endBlob.arrayBuffer()));
       
-      // 合并所有采样数据
+      // 合并所有数据
       const totalLength = metadataBuffer.length + chunks.reduce((sum, chunk) => sum + chunk.length, 0);
       dataToHash = new Uint8Array(totalLength);
       let offset = 0;
       
-      // 添加元信息
       dataToHash.set(metadataBuffer, offset);
       offset += metadataBuffer.length;
       
-      // 添加采样数据
       for (const chunk of chunks) {
         dataToHash.set(chunk, offset);
         offset += chunk.length;
@@ -813,7 +820,7 @@ async function uploadFileWithHash() {
     return;
   }
 
-  if (!tokenManager.hasToken()) {
+  if (!state.accessToken) {
     $('fileUploadResFmt').textContent = '未登录，请先登录';
     return;
   }
@@ -821,10 +828,8 @@ async function uploadFileWithHash() {
   try {
     updateProgress(0, '准备上传...');
     
-    // 1. 计算文件采样哈希
-    updateProgress(10, file.size > 30 * 1024 * 1024 
-      ? '正在计算采样哈希（开头+中间+结尾）...' 
-      : '正在计算完整哈希...');
+    // 1. 计算文件哈希
+    updateProgress(10, '正在计算文件哈希...');
     const fileHash = await calculateSHA256(file);
     console.log('文件哈希:', fileHash);
     
@@ -862,7 +867,7 @@ async function uploadFileWithHash() {
       url: `${state.storageBase}/upload/request`,
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${tokenManager.getAccessToken()}`
+        'Authorization': `Bearer ${state.accessToken}`
       },
       body: requestBody
     };
@@ -979,7 +984,7 @@ async function uploadLargeFileMultipart(file, uploadInfo) {
       `${state.storageBase}/multipart/part-url?file_key=${uploadInfo.file_key}&upload_id=${uploadInfo.multipart_upload_id}&part_number=${i + 1}`,
       {
         headers: {
-          'Authorization': `Bearer ${tokenManager.getAccessToken()}`
+          'Authorization': `Bearer ${state.accessToken}`
         }
       }
     );
@@ -1033,7 +1038,7 @@ function renderUploadedFiles() {
   }
   
   container.innerHTML = state.uploadedFiles.map((file, index) => `
-    <div style="padding: 10px; margin: 5px 0; background: ${file.instant ? '#e8f5e9' : '#f5f5f5'}; border-radius: 5px;">
+    <div id="file-item-${index}" style="padding: 10px; margin: 5px 0; background: ${file.instant ? '#e8f5e9' : '#f5f5f5'}; border-radius: 5px;">
       <div style="font-weight: bold;">${file.filename} ${file.instant ? '⚡秒传' : ''}</div>
       <div style="font-size: 0.9em; color: #666; margin: 5px 0;">
         文件key: ${file.file_key}
@@ -1044,12 +1049,13 @@ function renderUploadedFiles() {
       </div>
       <div style="margin-top: 5px;">
         <a href="${file.file_url}" target="_blank" style="color: #007bff; text-decoration: none;">
-          ${file.preview_support === 'inline_preview' ? '🖼️ 预览' : '📥 下载'}
+          ${file.preview_support === 'inline_preview' ? '🖼️ 新标签页预览' : '📥 下载'}
         </a>
-        <button onclick="previewUploadedFile('${file.file_url}', '${file.filename}')" style="margin-left: 10px; padding: 2px 8px; font-size: 0.85em;">📺 在线查看</button>
+        <button onclick="toggleInlinePreview(${index}, '${file.file_url.replace(/'/g, "\\'")}', '${file.filename.replace(/'/g, "\\'")}', ${file.file_size || 0})" style="margin-left: 10px; padding: 2px 8px; font-size: 0.85em;">📺 在线查看</button>
         <button onclick="copyToClipboard('${file.file_url}')" style="margin-left: 10px; padding: 2px 8px; font-size: 0.85em;">复制URL</button>
         <button onclick="removeUploadedFile(${index})" style="margin-left: 10px; padding: 2px 8px; font-size: 0.85em; background: #f44336; color: white;">删除记录</button>
       </div>
+      <div id="inline-preview-${index}" style="display: none; margin-top: 15px; padding: 10px; background: white; border-radius: 5px; border: 2px solid #007bff;"></div>
     </div>
   `).join('');
 }
@@ -1079,10 +1085,222 @@ function removeUploadedFile(index) {
 }
 
 // =============================================
+// 预签名URL管理
+// =============================================
+
+// 获取预签名URL（带缓存和过期检查，自动重试，15GB阈值）
+async function getPresignedUrl(uuid, filename, retryCount = 0) {
+  const MAX_RETRIES = 2;
+  
+  // 0. 从localStorage重新读取最新的Token（防止刷新后未同步）
+  state.accessToken = localStorage.getItem('accessToken') || '';
+  state.refreshToken = localStorage.getItem('refreshToken') || '';
+  
+  // 检查Token是否存在
+  if (!state.accessToken) {
+    throw new Error('未登录，请先登录');
+  }
+  
+  // 检查Token是否过期
+  const claims = decodeJwt(state.accessToken);
+  if (claims && claims.exp && claims.exp * 1000 < Date.now()) {
+    // Token已过期，尝试刷新
+    console.log('🔄 Access Token已过期，尝试刷新...');
+    try {
+      await refreshAccessToken();
+      // 刷新成功后，重新读取token
+      state.accessToken = localStorage.getItem('accessToken') || '';
+      if (!state.accessToken) {
+        throw new Error('Token刷新失败');
+      }
+      console.log('✅ Token刷新成功，继续执行');
+    } catch (e) {
+      console.error('❌ Token刷新失败:', e);
+      throw new Error('登录已过期，请重新登录');
+    }
+  }
+  
+  // 1. 检查缓存是否有效（过期前5分钟需要刷新）
+  const cached = state.presignedUrls[uuid];
+  if (cached && cached.expiresAt) {
+    const expiresTime = new Date(cached.expiresAt);
+    const now = new Date();
+    const remainingMs = expiresTime - now;
+    
+    // 还有5分钟以上过期，直接使用缓存
+    if (remainingMs > 5 * 60 * 1000) {
+      console.log(`✅ 使用缓存的预签名URL，剩余时间: ${Math.floor(remainingMs / 60000)} 分钟`);
+      return cached.url;
+    } else if (remainingMs > 0) {
+      // 还未过期但少于5分钟，提示用户
+      const minutes = Math.floor(remainingMs / 60000);
+      console.log(`⚠️ 文件访问链接将在 ${minutes} 分钟后过期，正在刷新链接...`);
+    } else {
+      // 已过期，清除缓存
+      console.log('🔄 缓存的预签名URL已过期，重新获取...');
+      delete state.presignedUrls[uuid];
+    }
+  }
+  
+  // 2. 检测文件大小，判断是否超大文件（15GB阈值）
+  const fileInfo = state.uploadedFiles.find(f => 
+    f.file_url && f.file_url.includes(uuid)
+  );
+  
+  const LARGE_FILE_THRESHOLD = 15 * 1024 * 1024 * 1024; // 15GB
+  const isLargeFile = fileInfo && fileInfo.file_size > LARGE_FILE_THRESHOLD;
+  
+  let endpoint, body;
+  
+  if (isLargeFile) {
+    // 超大文件：提示用户输入预计下载时间
+    const hours = prompt(
+      `检测到大文件（${formatFileSize(fileInfo.file_size)}）\n请输入预计下载时间（小时，最少3，最多168）:`,
+      '6'
+    );
+    
+    if (!hours || parseInt(hours) < 3) {
+      throw new Error('下载已取消或时间无效（最少3小时）');
+    }
+    
+    const estimatedSeconds = Math.min(parseInt(hours) * 3600, 604800); // 最多7天
+    endpoint = `${state.storageBase}/file/${uuid}/presigned-url/extended`;
+    body = {
+      operation: 'download',
+      estimated_download_time: estimatedSeconds
+    };
+  } else {
+    // 普通文件：3小时有效期
+    endpoint = `${state.storageBase}/file/${uuid}/presigned-url`;
+    body = {
+      operation: 'download'
+    };
+  }
+  
+  // 5. 请求预签名URL（确保使用最新的token）
+  const currentToken = localStorage.getItem('accessToken') || state.accessToken;
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${currentToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+  
+  // 改进错误处理（支持自动重试）
+  if (!response.ok) {
+    let errorMessage = '获取下载链接失败';
+    let shouldRetry = false;
+    
+    try {
+      const error = await response.json();
+      errorMessage = error.error || errorMessage;
+    } catch (e) {
+      // 如果响应不是JSON（如HTML错误页）
+      if (response.status === 401) {
+        // Token过期，尝试刷新并重试
+        if (retryCount < MAX_RETRIES) {
+          console.log(`🔄 检测到401错误，刷新Token并重试 (${retryCount + 1}/${MAX_RETRIES})...`);
+          try {
+            await refreshAccessToken();
+            // Token刷新成功，重新读取并递归重试
+            state.accessToken = localStorage.getItem('accessToken') || '';
+            state.refreshToken = localStorage.getItem('refreshToken') || '';
+            console.log('✅ Token刷新成功，正在重试请求...');
+            return await getPresignedUrl(uuid, filename, retryCount + 1);
+          } catch (refreshError) {
+            console.error('❌ Token刷新失败:', refreshError);
+            errorMessage = '登录已过期，请重新登录';
+            // 清空过期token
+            state.accessToken = '';
+            state.refreshToken = '';
+            localStorage.removeItem('accessToken');
+            localStorage.removeItem('refreshToken');
+            renderLocalState();
+          }
+        } else {
+          console.error('❌ 已达到最大重试次数');
+          errorMessage = '登录已过期，请重新登录';
+          // 清空过期token
+          state.accessToken = '';
+          state.refreshToken = '';
+          localStorage.removeItem('accessToken');
+          localStorage.removeItem('refreshToken');
+          renderLocalState();
+        }
+      } else if (response.status === 403) {
+        errorMessage = '无权访问此文件';
+      } else if (response.status === 404) {
+        errorMessage = '文件不存在';
+      } else {
+        const text = await response.text().catch(() => '');
+        errorMessage = `服务器错误 (${response.status})${text ? ': ' + text.substring(0, 100) : ''}`;
+      }
+    }
+    
+    throw new Error(errorMessage);
+  }
+  
+  const data = await response.json();
+  
+  // 4. 缓存预签名URL
+  state.presignedUrls[uuid] = {
+    url: data.presigned_url,
+    expiresAt: data.expires_at,
+    cachedAt: new Date().toISOString()
+  };
+  
+  console.log(`✅ 获取新的预签名URL，过期时间: ${data.expires_at}`);
+  if (data.warning) {
+    console.warn(`⚠️ ${data.warning}`);
+  }
+  
+  return data.presigned_url;
+}
+
+// 视频/图片加载错误时自动重新获取URL
+async function handleMediaError(event, uuid, filename, mediaElement) {
+  console.warn('⚠️ 媒体加载失败，可能是URL过期');
+  
+  // 检查是否是网络错误还是URL过期
+  const cached = state.presignedUrls[uuid];
+  if (cached && cached.expiresAt) {
+    const expiresTime = new Date(cached.expiresAt);
+    const now = new Date();
+    
+    if (now > expiresTime) {
+      console.log('🔄 检测到URL已过期，自动重新获取...');
+      try {
+        // 清除过期的缓存
+        delete state.presignedUrls[uuid];
+        
+        // 重新获取预签名URL
+        const newUrl = await getPresignedUrl(uuid, filename);
+        
+        // 更新媒体元素的src
+        if (mediaElement) {
+          mediaElement.src = newUrl;
+          console.log('✅ URL已更新，正在重新加载...');
+        }
+        
+        return newUrl;
+      } catch (error) {
+        console.error('❌ 重新获取URL失败:', error);
+        throw error;
+      }
+    }
+  }
+  
+  // 如果不是URL过期，可能是其他网络问题
+  throw new Error('媒体加载失败，请检查网络连接');
+}
+
+// =============================================
 // 文件预览功能
 // =============================================
 
-// 预览文件（根据文件名后缀判断类型）
+// 预览文件（根据文件名后缀判断类型，支持UUID预签名URL）
 async function previewFile(filename = '') {
   const urlInput = document.getElementById('preview_url');
   const previewContainer = document.getElementById('filePreview');
@@ -1093,7 +1311,7 @@ async function previewFile(filename = '') {
     return;
   }
   
-  // 判断是否是UUID格式的URL（需要Authorization）
+  // 判断是否是UUID格式的URL（需要获取预签名URL）
   const isUuidUrl = url.includes('/api/storage/file/');
   
   // 确定用于判断类型的字符串（优先使用filename，否则使用URL）
@@ -1104,7 +1322,34 @@ async function previewFile(filename = '') {
   if (lowerStr.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
     // 图片预览
     if (isUuidUrl) {
-      await previewImageUuid(url, previewContainer, filename);
+      previewContainer.innerHTML = '<p>正在获取图片链接...</p>';
+      try {
+        const uuid = url.split('/').pop();
+        const presignedUrl = await getPresignedUrl(uuid, filename);
+        
+        previewContainer.innerHTML = `
+          <div>
+            <h4 style="margin-bottom: 10px;">图片预览（直连MinIO）</h4>
+            <img src="${presignedUrl}" alt="图片预览" 
+                 style="max-width: 100%; max-height: 600px; border-radius: 5px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" 
+                 onerror="this.parentElement.innerHTML='<p style=color:red>图片加载失败，链接可能已过期</p>'" />
+            <div style="margin-top: 10px; font-size: 0.9em; color: #666;">
+              ${filename ? `文件名: ${filename}<br/>` : ''}
+              UUID: ${uuid}<br/>
+              ✅ 客户端直连MinIO，后端零压力<br/>
+              ⏰ 链接3小时内有效
+            </div>
+            <div style="margin-top: 10px;">
+              <a href="${presignedUrl}" download="${filename || 'image.jpg'}" 
+                 style="padding: 8px 16px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; cursor: pointer;">
+                📥 下载图片
+              </a>
+            </div>
+          </div>
+        `;
+      } catch (error) {
+        previewContainer.innerHTML = `<p style="color: red;">加载失败: ${error.message}</p>`;
+      }
     } else {
       previewContainer.innerHTML = `
         <div>
@@ -1119,9 +1364,39 @@ async function previewFile(filename = '') {
       `;
     }
   } else if (lowerStr.match(/\.(mp4|webm|ogg|mov)$/i)) {
-    // 视频预览
+    // 视频预览 - 必须使用预签名URL
     if (isUuidUrl) {
-      await previewVideoUuid(url, previewContainer, filename);
+      previewContainer.innerHTML = '<p>正在获取视频流式播放链接...</p>';
+      try {
+        const uuid = url.split('/').pop();
+        const presignedUrl = await getPresignedUrl(uuid, filename);
+        
+        previewContainer.innerHTML = `
+          <div>
+            <h4 style="margin-bottom: 10px;">视频在线流式播放</h4>
+            <video controls style="max-width: 100%; max-height: 600px; border-radius: 5px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+              <source src="${presignedUrl}" type="video/mp4">
+              您的浏览器不支持视频播放
+            </video>
+            <div style="margin-top: 10px; font-size: 0.9em; color: #666;">
+              ${filename ? `文件名: ${filename}<br/>` : ''}
+              UUID: ${uuid}<br/>
+              ✅ 真正的流式播放（支持拖动进度条）<br/>
+              ✅ 支持Range请求（按需加载视频片段）<br/>
+              ✅ 客户端直连MinIO，后端零压力<br/>
+              ⏰ 链接3小时内有效
+            </div>
+            <div style="margin-top: 10px;">
+              <a href="${presignedUrl}" download="${filename || 'video.mp4'}" 
+                 style="padding: 8px 16px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; cursor: pointer;">
+                📥 下载视频
+              </a>
+            </div>
+          </div>
+        `;
+      } catch (error) {
+        previewContainer.innerHTML = `<p style="color: red;">加载失败: ${error.message}</p>`;
+      }
     } else {
       previewContainer.innerHTML = `
         <div>
@@ -1141,7 +1416,32 @@ async function previewFile(filename = '') {
   } else if (lowerStr.match(/\.pdf$/i)) {
     // PDF预览
     if (isUuidUrl) {
-      await previewPdfUuid(url, previewContainer, filename);
+      previewContainer.innerHTML = '<p>正在获取PDF链接...</p>';
+      try {
+        const uuid = url.split('/').pop();
+        const presignedUrl = await getPresignedUrl(uuid, filename);
+        
+        previewContainer.innerHTML = `
+          <div>
+            <h4 style="margin-bottom: 10px;">PDF预览</h4>
+            <iframe src="${presignedUrl}" 
+                    style="width: 100%; height: 600px; border: none; border-radius: 5px;"></iframe>
+            <div style="margin-top: 10px; font-size: 0.9em; color: #666;">
+              ${filename ? `文件名: ${filename}<br/>` : ''}
+              UUID: ${uuid}<br/>
+              ⏰ 链接3小时内有效
+            </div>
+            <div style="margin-top: 10px;">
+              <a href="${presignedUrl}" download="${filename || 'document.pdf'}" 
+                 style="padding: 8px 16px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; cursor: pointer;">
+                📥 下载PDF
+              </a>
+            </div>
+          </div>
+        `;
+      } catch (error) {
+        previewContainer.innerHTML = `<p style="color: red;">加载失败: ${error.message}</p>`;
+      }
     } else {
       previewContainer.innerHTML = `
         <div>
@@ -1158,17 +1458,28 @@ async function previewFile(filename = '') {
   } else {
     // 其他文件类型
     if (isUuidUrl) {
-      previewContainer.innerHTML = `
-        <div>
-          <h4 style="margin-bottom: 10px;">文件信息 (UUID访问)</h4>
-          <p>文件名: ${filename || '未知'}</p>
-          <p style="color: #666; word-break: break-all;">UUID: ${url.split('/').pop()}</p>
-          <p style="color: #4caf50;">🔗 需要权限访问</p>
-          <div style="margin-top: 15px;">
-            <button onclick="downloadUuidFile('${url}', '${filename || url.split('/').pop()}')" style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">📥 下载文件</button>
+      previewContainer.innerHTML = '<p>正在获取文件链接...</p>';
+      try {
+        const uuid = url.split('/').pop();
+        const presignedUrl = await getPresignedUrl(uuid, filename);
+        
+        previewContainer.innerHTML = `
+          <div>
+            <h4 style="margin-bottom: 10px;">文件信息 (UUID访问)</h4>
+            <p>文件名: ${filename || '未知'}</p>
+            <p style="color: #666; word-break: break-all;">UUID: ${uuid}</p>
+            <p style="color: #4caf50;">🔗 已获取临时访问链接</p>
+            <div style="margin-top: 15px;">
+              <a href="${presignedUrl}" download="${filename || uuid}" 
+                 style="padding: 10px 20px; background: #28a745; color: white; text-decoration: none; border-radius: 5px; cursor: pointer;">
+                📥 下载文件
+              </a>
+            </div>
           </div>
-        </div>
-      `;
+        `;
+      } catch (error) {
+        previewContainer.innerHTML = `<p style="color: red;">加载失败: ${error.message}</p>`;
+      }
     } else {
       previewContainer.innerHTML = `
         <div>
@@ -1185,193 +1496,7 @@ async function previewFile(filename = '') {
   }
 }
 
-// UUID图片预览
-async function previewImageUuid(url, container, filename) {
-  container.innerHTML = '<p>正在加载图片...</p>';
-  try {
-    const response = await fetch(url, {
-      headers: { 'Authorization': `Bearer ${tokenManager.getAccessToken()}` }
-    });
-    if (!response.ok) throw new Error('无权访问或文件不存在');
-    const blob = await response.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    container.innerHTML = `
-      <div>
-        <h4 style="margin-bottom: 10px;">图片预览 (UUID访问)</h4>
-        <img src="${blobUrl}" alt="图片预览" style="max-width: 100%; max-height: 600px; border-radius: 5px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" />
-        <div style="margin-top: 10px; font-size: 0.9em; color: #666;">
-          ${filename ? `文件名: ${filename}<br/>` : ''}
-          UUID: ${url.split('/').pop()}
-        </div>
-        <div style="margin-top: 10px;">
-          <button onclick="downloadUuidFile('${url}', '${filename || url.split('/').pop() + '.jpg'}')" style="padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">📥 下载图片</button>
-        </div>
-      </div>
-    `;
-  } catch (error) {
-    container.innerHTML = `<p style="color: red;">加载失败: ${error.message}</p>`;
-  }
-}
-
-// UUID视频预览（通过Service Worker实现真正的流式播放）
-async function previewVideoUuid(url, container, filename) {
-  // 检查是否已登录
-  if (!tokenManager.hasToken()) {
-    container.innerHTML = `
-      <div>
-        <h4 style="margin-bottom: 10px;">⚠️ 未登录</h4>
-        <p style="color: #ff9800;">请先登录以访问文件</p>
-      </div>
-    `;
-    return;
-  }
-  
-  // 检查Service Worker状态
-  if (!tokenManager.isServiceWorkerReady()) {
-    container.innerHTML = `
-      <div>
-        <h4 style="margin-bottom: 10px;">⚠️ Service Worker 未就绪</h4>
-        <p style="color: #ff9800;">首次使用需要刷新页面以启用流式播放支持</p>
-        <button onclick="location.reload()" style="margin-top: 10px; padding: 8px 16px; background: #2196f3; color: white; border: none; border-radius: 5px; cursor: pointer;">刷新页面</button>
-        <div style="margin-top: 10px; font-size: 0.9em; color: #666;">
-          <button onclick="tokenManager.diagnose()" style="padding: 6px 12px; font-size: 0.9em;">🔍 运行诊断</button>
-        </div>
-      </div>
-    `;
-    return;
-  }
-  
-  container.innerHTML = `
-    <div>
-      <h4 style="margin-bottom: 10px;">视频预览 (UUID访问 - 真正流式播放 🚀)</h4>
-      <video 
-        id="uuidVideo" 
-        controls 
-        preload="metadata"
-        style="max-width: 100%; max-height: 600px; border-radius: 5px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-        <source src="${url}" type="video/mp4">
-        您的浏览器不支持视频播放
-      </video>
-      <div style="margin-top: 10px; font-size: 0.9em; color: #666;">
-        ${filename ? `📁 文件名: ${filename}<br/>` : ''}
-        🔗 UUID: ${url.split('/').pop()}<br/>
-        <span id="videoStatus">
-          ✅ 支持流式播放：
-          <ul style="margin: 5px 0; padding-left: 20px;">
-            <li>边看边加载，无需等待完整下载</li>
-            <li>支持拖动进度条立即响应</li>
-            <li>支持快进/快退</li>
-            <li>节省流量和内存</li>
-          </ul>
-        </span>
-      </div>
-      <div style="margin-top: 10px;">
-        <button onclick="downloadUuidFile('${url}', '${filename || url.split('/').pop() + '.mp4'}')" style="padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">📥 下载视频</button>
-      </div>
-    </div>
-  `;
-  
-  const video = document.getElementById('uuidVideo');
-  const statusSpan = document.getElementById('videoStatus');
-  
-  // 监听视频事件
-  video.addEventListener('loadstart', () => {
-    console.log('[Video] 开始加载');
-  });
-  
-  video.addEventListener('loadedmetadata', () => {
-    console.log('[Video] 元数据加载完成');
-    const duration = video.duration;
-    const minutes = Math.floor(duration / 60);
-    const seconds = Math.floor(duration % 60);
-    statusSpan.innerHTML += `<br/>⏱️ 视频时长: ${minutes}:${seconds.toString().padStart(2, '0')}`;
-  });
-  
-  video.addEventListener('progress', () => {
-    if (video.buffered.length > 0) {
-      const buffered = video.buffered.end(0);
-      const duration = video.duration;
-      const percent = (buffered / duration * 100).toFixed(1);
-      console.log(`[Video] 缓冲进度: ${percent}%`);
-    }
-  });
-  
-  video.addEventListener('canplay', () => {
-    console.log('[Video] 可以开始播放');
-  });
-  
-  video.addEventListener('error', (e) => {
-    console.error('[Video] 播放错误:', e);
-    const error = video.error;
-    let errorMsg = '视频加载失败';
-    let troubleshoot = '';
-    
-    if (error) {
-      switch(error.code) {
-        case error.MEDIA_ERR_ABORTED:
-          errorMsg = '播放被中止';
-          break;
-        case error.MEDIA_ERR_NETWORK:
-          errorMsg = '网络错误';
-          troubleshoot = '请检查网络连接';
-          break;
-        case error.MEDIA_ERR_DECODE:
-          errorMsg = '解码错误';
-          troubleshoot = '视频格式可能不受支持';
-          break;
-        case error.MEDIA_ERR_SRC_NOT_SUPPORTED:
-          errorMsg = '无权访问或不支持的视频格式';
-          troubleshoot = `
-            <br/><br/>可能的原因：
-            <ul style="text-align: left; margin: 10px 0;">
-              <li>❌ 未登录或token已过期 - 请重新登录</li>
-              <li>❌ Service Worker未同步token - 请刷新页面</li>
-              <li>❌ 没有访问权限 - 请检查文件权限</li>
-            </ul>
-            <button onclick="location.reload()" style="margin-top: 10px; padding: 8px 16px; background: #2196f3; color: white; border: none; border-radius: 5px; cursor: pointer;">刷新页面重试</button>
-          `;
-          break;
-      }
-    }
-    
-    container.innerHTML = `
-      <div style="text-align: center; padding: 20px;">
-        <p style="color: red; font-size: 1.2em;">❌ ${errorMsg}</p>
-        ${troubleshoot}
-      </div>
-    `;
-  });
-}
-
-// UUID PDF预览
-async function previewPdfUuid(url, container, filename) {
-  container.innerHTML = '<p>正在加载PDF...</p>';
-  try {
-    const response = await fetch(url, {
-      headers: { 'Authorization': `Bearer ${tokenManager.getAccessToken()}` }
-    });
-    if (!response.ok) throw new Error('无权访问或文件不存在');
-    const blob = await response.blob();
-    const blobUrl = URL.createObjectURL(blob);
-    container.innerHTML = `
-      <div>
-        <h4 style="margin-bottom: 10px;">PDF预览 (UUID访问)</h4>
-        <iframe src="${blobUrl}" style="width: 100%; height: 600px; border: none; border-radius: 5px;"></iframe>
-        <div style="margin-top: 10px; font-size: 0.9em; color: #666;">
-          ${filename ? `文件名: ${filename}<br/>` : ''}
-          UUID: ${url.split('/').pop()}
-        </div>
-        <div style="margin-top: 10px;">
-          <button onclick="downloadUuidFile('${url}', '${filename || url.split('/').pop() + '.pdf'}')" style="padding: 8px 16px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">📥 下载PDF</button>
-        </div>
-      </div>
-    `;
-  } catch (error) {
-    container.innerHTML = `<p style="color: red;">加载失败: ${error.message}</p>`;
-  }
-}
-
-// 从已上传文件列表预览
+// 从已上传文件列表预览（已弃用，使用 toggleInlinePreview）
 function previewUploadedFile(url, filename) {
   document.getElementById('preview_url').value = url;
   previewFile(filename);
@@ -1379,58 +1504,253 @@ function previewUploadedFile(url, filename) {
   document.getElementById('filePreview').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
-// =============================================
-// UUID 文件下载功能（需要权限验证）
-// =============================================
-async function downloadUuidFile(url, filename) {
-  if (!tokenManager.hasToken()) {
-    alert('未登录，请先登录');
+// 切换内联预览（直接在文件列表项下方显示）
+async function toggleInlinePreview(index, url, filename, fileSize) {
+  const previewContainer = document.getElementById(`inline-preview-${index}`);
+  const fileItem = document.getElementById(`file-item-${index}`);
+  
+  if (!previewContainer || !fileItem) return;
+  
+  // 如果已经展开，则收起
+  if (previewContainer.style.display !== 'none') {
+    previewContainer.style.display = 'none';
+    previewContainer.innerHTML = '';
     return;
   }
   
+  // 关闭其他所有预览
+  document.querySelectorAll('[id^="inline-preview-"]').forEach(el => {
+    el.style.display = 'none';
+    el.innerHTML = '';
+  });
+  
+  // 显示当前预览
+  previewContainer.style.display = 'block';
+  previewContainer.innerHTML = '<p style="color: #666;">⏳ 正在获取访问链接...</p>';
+  
+  // 判断是否是UUID格式的URL
+  const isUuidUrl = url.includes('/api/storage/file/');
+  const lowerFilename = filename.toLowerCase();
+  
   try {
-    // 显示下载提示
-    console.log('开始下载文件:', filename);
+    let presignedUrl = url;
+    let uuid = '';
     
-    // 获取文件
-    const response = await fetch(url, {
-      headers: { 'Authorization': `Bearer ${tokenManager.getAccessToken()}` }
-    });
-    
-    if (!response.ok) {
-      throw new Error('无权访问或文件不存在');
-    }
-    
-    // 获取文件blob
-    const blob = await response.blob();
-    
-    // 从响应头获取文件名（如果有）
-    const contentDisposition = response.headers.get('content-disposition');
-    let downloadFilename = filename;
-    if (contentDisposition) {
-      const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-      if (filenameMatch && filenameMatch[1]) {
-        downloadFilename = filenameMatch[1].replace(/['"]/g, '');
+    // 如果是UUID URL，获取预签名URL
+    if (isUuidUrl) {
+      uuid = url.split('/').pop();
+      try {
+        presignedUrl = await getPresignedUrl(uuid, filename);
+        if (!presignedUrl) {
+          throw new Error('获取访问链接失败');
+        }
+      } catch (error) {
+        // 特殊处理登录过期的情况
+        if (error.message.includes('登录已过期') || error.message.includes('未登录')) {
+          previewContainer.innerHTML = `
+            <div style="color: #ff6b6b; padding: 20px; text-align: center;">
+              <p style="font-size: 1.1em; margin-bottom: 10px;">🔒 ${error.message}</p>
+              <p style="font-size: 0.9em; color: #666; margin-bottom: 15px;">请重新登录后继续</p>
+              <button onclick="document.getElementById('inline-preview-${index}').style.display='none'; window.scrollTo({top: 0, behavior: 'smooth'});" 
+                      style="padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">
+                返回顶部登录
+              </button>
+            </div>
+          `;
+          return;
+        }
+        throw error;
       }
     }
     
-    // 创建下载链接
-    const blobUrl = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = blobUrl;
-    a.download = downloadFilename || 'download';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    // 根据文件类型生成预览内容
+    if (lowerFilename.match(/\.(jpg|jpeg|png|gif|webp)$/i)) {
+      // 图片预览（支持自动重试）
+      previewContainer.innerHTML = `
+        <div style="text-align: center;">
+          <div style="font-weight: bold; margin-bottom: 10px; color: #007bff;">📷 图片预览</div>
+          <img id="img-${index}" src="${presignedUrl}" alt="${filename}" 
+               style="max-width: 100%; max-height: 500px; border-radius: 5px; box-shadow: 0 2px 8px rgba(0,0,0,0.15);" />
+          ${isUuidUrl ? `
+            <div style="margin-top: 10px; font-size: 0.85em; color: #666;">
+              ✅ 客户端直连MinIO | ⏰ 链接3小时有效 | 🔄 URL过期自动刷新
+            </div>
+          ` : ''}
+          <div style="margin-top: 10px;">
+            <a href="${presignedUrl}" download="${filename}" 
+               style="padding: 6px 12px; background: #28a745; color: white; text-decoration: none; border-radius: 4px; font-size: 0.9em;">
+              📥 下载
+            </a>
+            <button onclick="document.getElementById('inline-preview-${index}').style.display='none'" 
+                    style="margin-left: 10px; padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">
+              关闭预览
+            </button>
+          </div>
+        </div>
+      `;
+      
+      // 添加错误处理（自动重试）
+      if (isUuidUrl) {
+        const imgElement = document.getElementById(`img-${index}`);
+        if (imgElement) {
+          imgElement.onerror = async () => {
+            try {
+              imgElement.onerror = null; // 防止循环
+              console.log('🔄 图片加载失败，尝试重新获取URL...');
+              const newUrl = await handleMediaError(null, uuid, filename, imgElement);
+              imgElement.src = newUrl;
+            } catch (error) {
+              imgElement.parentElement.innerHTML = '<p style="color:red">图片加载失败: ' + error.message + '</p>';
+            }
+          };
+        }
+      }
+    } else if (lowerFilename.match(/\.(mp4|webm|ogg|mov)$/i)) {
+      // 视频预览（支持自动重试）
+      previewContainer.innerHTML = `
+        <div>
+          <div style="font-weight: bold; margin-bottom: 10px; color: #007bff;">🎬 视频在线播放</div>
+          <video id="video-${index}" controls style="width: 100%; max-height: 500px; border-radius: 5px; box-shadow: 0 2px 8px rgba(0,0,0,0.15);">
+            <source src="${presignedUrl}" type="video/mp4">
+            您的浏览器不支持视频播放
+          </video>
+          ${isUuidUrl ? `
+            <div style="margin-top: 10px; font-size: 0.85em; color: #666;">
+              ✅ 流式播放（可拖动进度条） | ✅ Range请求 | ✅ 直连MinIO | ⏰ 链接3小时有效 | 🔄 URL过期自动刷新
+            </div>
+          ` : ''}
+          <div style="margin-top: 10px;">
+            <a href="${presignedUrl}" download="${filename}" 
+               style="padding: 6px 12px; background: #28a745; color: white; text-decoration: none; border-radius: 4px; font-size: 0.9em;">
+              📥 下载视频
+            </a>
+            <button onclick="document.getElementById('inline-preview-${index}').style.display='none'; var v=document.getElementById('video-${index}'); if(v)v.pause();" 
+                    style="margin-left: 10px; padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">
+              关闭预览
+            </button>
+          </div>
+        </div>
+      `;
+      
+      // 添加错误处理（自动重试）
+      if (isUuidUrl) {
+        const videoElement = document.getElementById(`video-${index}`);
+        if (videoElement) {
+          videoElement.onerror = async () => {
+            try {
+              videoElement.onerror = null; // 防止循环
+              console.log('🔄 视频加载失败，尝试重新获取URL...');
+              const currentTime = videoElement.currentTime || 0; // 保存当前播放位置
+              const newUrl = await handleMediaError(null, uuid, filename, videoElement);
+              videoElement.src = newUrl;
+              videoElement.currentTime = currentTime; // 恢复播放位置
+              videoElement.load();
+            } catch (error) {
+              videoElement.parentElement.innerHTML = '<p style="color:red">视频加载失败: ' + error.message + '</p>';
+            }
+          };
+        }
+      }
+    } else if (lowerFilename.match(/\.pdf$/i)) {
+      // PDF预览
+      previewContainer.innerHTML = `
+        <div>
+          <div style="font-weight: bold; margin-bottom: 10px; color: #007bff;">📄 PDF预览</div>
+          <iframe src="${presignedUrl}" 
+                  style="width: 100%; height: 500px; border: none; border-radius: 5px; box-shadow: 0 2px 8px rgba(0,0,0,0.15);"></iframe>
+          ${isUuidUrl ? `
+            <div style="margin-top: 10px; font-size: 0.85em; color: #666;">
+              ⏰ 链接3小时有效
+            </div>
+          ` : ''}
+          <div style="margin-top: 10px;">
+            <a href="${presignedUrl}" download="${filename}" 
+               style="padding: 6px 12px; background: #28a745; color: white; text-decoration: none; border-radius: 4px; font-size: 0.9em;">
+              📥 下载PDF
+            </a>
+            <button onclick="document.getElementById('inline-preview-${index}').style.display='none'" 
+                    style="margin-left: 10px; padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">
+              关闭预览
+            </button>
+          </div>
+        </div>
+      `;
+    } else {
+      // 其他文件类型
+      previewContainer.innerHTML = `
+        <div>
+          <div style="font-weight: bold; margin-bottom: 10px; color: #007bff;">📦 文件信息</div>
+          <p>文件名: ${filename}</p>
+          ${fileSize > 0 ? `<p>大小: ${formatFileSize(fileSize)}</p>` : ''}
+          ${isUuidUrl ? `<p style="color: #666; word-break: break-all; font-size: 0.9em;">UUID: ${uuid}</p>` : ''}
+          <p style="color: #999;">该文件类型不支持在线预览</p>
+          <div style="margin-top: 10px;">
+            <a href="${presignedUrl}" download="${filename}" 
+               style="padding: 6px 12px; background: #28a745; color: white; text-decoration: none; border-radius: 4px; font-size: 0.9em;">
+              📥 下载文件
+            </a>
+            <button onclick="document.getElementById('inline-preview-${index}').style.display='none'" 
+                    style="margin-left: 10px; padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">
+              关闭
+            </button>
+          </div>
+        </div>
+      `;
+    }
     
-    // 释放blob URL
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
-    
-    console.log('文件下载成功:', downloadFilename);
+    // 平滑滚动到预览区域
+    setTimeout(() => {
+      previewContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 100);
     
   } catch (error) {
-    alert('下载失败: ' + error.message);
-    console.error('下载失败:', error);
+    console.error('预览失败:', error);
+    
+    // 友好的错误提示
+    let errorHtml = '';
+    if (error.message.includes('登录已过期') || error.message.includes('未登录')) {
+      errorHtml = `
+        <div style="color: #ff6b6b; padding: 20px; text-align: center;">
+          <p style="font-size: 1.1em; margin-bottom: 10px;">🔒 ${error.message}</p>
+          <p style="font-size: 0.9em; color: #666; margin-bottom: 15px;">请重新登录后继续</p>
+          <button onclick="document.getElementById('inline-preview-${index}').style.display='none'; window.scrollTo({top: 0, behavior: 'smooth'});" 
+                  style="padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">
+            返回顶部登录
+          </button>
+        </div>
+      `;
+    } else if (error.message.includes('无权访问')) {
+      errorHtml = `
+        <div style="color: #ff9800; padding: 20px; text-align: center;">
+          <p style="font-size: 1.1em; margin-bottom: 10px;">🚫 ${error.message}</p>
+          <p style="font-size: 0.9em; color: #666;">您没有访问此文件的权限</p>
+        </div>
+      `;
+    } else if (error.message.includes('文件不存在')) {
+      errorHtml = `
+        <div style="color: #f44336; padding: 20px; text-align: center;">
+          <p style="font-size: 1.1em; margin-bottom: 10px;">❌ ${error.message}</p>
+          <p style="font-size: 0.9em; color: #666;">文件可能已被删除</p>
+        </div>
+      `;
+    } else {
+      errorHtml = `
+        <div style="color: #f44336; padding: 20px;">
+          <p style="font-size: 1.1em; margin-bottom: 10px;">❌ 加载失败</p>
+          <p style="font-size: 0.9em; color: #666; word-break: break-word;">${error.message}</p>
+        </div>
+      `;
+    }
+    
+    previewContainer.innerHTML = `
+      ${errorHtml}
+      <div style="text-align: center; margin-top: 10px;">
+        <button onclick="document.getElementById('inline-preview-${index}').style.display='none'" 
+                style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;">
+          关闭
+        </button>
+      </div>
+    `;
   }
 }
 

@@ -1,102 +1,98 @@
 use axum::{
     extract::{Path, State},
-    http::{StatusCode, header},
-    response::{IntoResponse, Response},
-    Extension,
+    http::StatusCode,
+    Extension, Json,
 };
-use serde_json::json;
-use std::sync::Arc;
+use serde_json::{json, Value};
 use tracing::{error, info};
 
 use crate::auth::middleware::AuthContext;
-use crate::storage::client::S3Client;
-use crate::storage::services::UuidMappingService;
+use crate::storage::handlers::upload::StorageState;
+use crate::storage::models::{PresignedUrlRequest, PresignedUrlResponse};
 
-/// Storage状态（用于文件访问）
-#[derive(Clone)]
-pub struct FileAccessState {
-    pub uuid_mapping_service: Arc<UuidMappingService>,
-    pub s3_client: Arc<S3Client>,
-}
-
-/// GET /api/storage/file/{uuid} - 通过UUID访问文件
-pub async fn get_file_by_uuid(
-    State(state): State<FileAccessState>,
+/// POST /api/storage/file/{uuid}/presigned-url
+/// 生成普通文件的预签名URL（3小时有效）
+pub async fn generate_presigned_url(
+    State(state): State<StorageState>,
     Extension(auth_ctx): Extension<AuthContext>,
     Path(uuid): Path<String>,
-) -> Result<Response, (StatusCode, axum::Json<serde_json::Value>)> {
-    let user_id = &auth_ctx.user_id.to_string();
+    Json(request): Json<PresignedUrlRequest>,
+) -> Result<Json<PresignedUrlResponse>, (StatusCode, Json<Value>)> {
+    info!("用户 {} 请求文件 {} 的预签名URL", auth_ctx.user_id, uuid);
+
+    // 使用默认3小时（10800秒）
+    let expires_in = request.expires_in.unwrap_or(10800);
     
-    info!("用户 {} 请求访问文件 UUID: {}", user_id, uuid);
-    
-    // 1. 检查权限
-    match state.uuid_mapping_service.check_permission(&uuid, user_id).await {
-        Ok(has_permission) => {
-            if !has_permission {
-                error!("用户 {} 无权访问文件 {}", user_id, uuid);
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    axum::Json(json!({ "error": "无权访问此文件" })),
-                ));
-            }
-        }
-        Err(e) => {
-            error!("权限检查失败: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(json!({ "error": "权限检查失败" })),
-            ));
-        }
+    // 限制最大有效期为3小时
+    if expires_in > 10800 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "普通文件预签名URL最长有效期为3小时" })),
+        ));
     }
-    
-    // 2. 获取映射信息
-    let mapping = match state.uuid_mapping_service.get_by_uuid(&uuid).await {
-        Ok(Some(m)) => m,
-        Ok(None) => {
-            error!("文件UUID不存在: {}", uuid);
-            return Err((
-                StatusCode::NOT_FOUND,
-                axum::Json(json!({ "error": "文件不存在" })),
-            ));
-        }
+
+    match state
+        .file_service
+        .generate_presigned_url(&auth_ctx.user_id.to_string(), &uuid, expires_in)
+        .await
+    {
+        Ok(response) => Ok(Json(response)),
         Err(e) => {
-            error!("获取映射信息失败: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(json!({ "error": "获取文件信息失败" })),
-            ));
-        }
-    };
-    
-    // 3. 确定bucket
-    let bucket = if mapping.physical_file_key.contains('/') {
-        "user-file"
-    } else {
-        "avatars"
-    };
-    
-    // 4. 从MinIO读取文件
-    match state.s3_client.get_file(bucket, &mapping.physical_file_key).await {
-        Ok(file_data) => {
-            info!("文件读取成功: {} ({}字节)", mapping.physical_file_key, file_data.len());
-            
-            // 5. 返回文件流
-            Ok((
-                [
-                    (header::CONTENT_TYPE, mapping.content_type.as_str()),
-                    (header::CONTENT_LENGTH, &file_data.len().to_string()),
-                    (header::CACHE_CONTROL, "public, max-age=31536000"),
-                ],
-                file_data,
-            ).into_response())
-        }
-        Err(e) => {
-            error!("从MinIO读取文件失败: {}", e);
+            error!("生成预签名URL失败: {}", e);
             Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(json!({ "error": "读取文件失败" })),
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": e.to_string() })),
             ))
         }
     }
 }
 
+/// POST /api/storage/file/{uuid}/presigned-url/extended
+/// 生成超大文件的预签名URL（自定义有效时间）
+pub async fn generate_extended_presigned_url(
+    State(state): State<StorageState>,
+    Extension(auth_ctx): Extension<AuthContext>,
+    Path(uuid): Path<String>,
+    Json(request): Json<PresignedUrlRequest>,
+) -> Result<Json<PresignedUrlResponse>, (StatusCode, Json<Value>)> {
+    info!("用户 {} 请求超大文件 {} 的扩展预签名URL", auth_ctx.user_id, uuid);
+
+    let expires_in = request
+        .estimated_download_time
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "超大文件必须指定 estimated_download_time" })),
+            )
+        })?;
+
+    // 限制：最少3小时，最多7天
+    if expires_in < 10800 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "有效期最少为3小时（10800秒）" })),
+        ));
+    }
+    
+    if expires_in > 604800 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "有效期最多为7天（604800秒）" })),
+        ));
+    }
+
+    match state
+        .file_service
+        .generate_presigned_url(&auth_ctx.user_id.to_string(), &uuid, expires_in)
+        .await
+    {
+        Ok(response) => Ok(Json(response)),
+        Err(e) => {
+            error!("生成扩展预签名URL失败: {}", e);
+            Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": e.to_string() })),
+            ))
+        }
+    }
+}

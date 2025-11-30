@@ -475,6 +475,85 @@ impl FileService {
             expires_in: 3600,
         })
     }
+
+    /// 生成文件预签名下载URL（通过UUID访问）
+    pub async fn generate_presigned_url(
+        &self,
+        user_id: &str,
+        file_uuid: &str,
+        expires_in: u32,
+    ) -> Result<PresignedUrlResponse> {
+        // 1. 查询UUID映射表获取物理文件信息
+        let mapping = sqlx::query!(
+            r#"
+            SELECT uuid, physical_file_key, file_hash, file_size, content_type,
+                   preview_support, first_uploader_id, created_at
+            FROM file_uuid_mapping
+            WHERE uuid = $1
+            "#,
+            file_uuid
+        )
+        .fetch_optional(&self.db)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("文件不存在"))?;
+
+        // 2. 验证用户权限
+        let _permission = sqlx::query!(
+            r#"
+            SELECT id, access_type, granted_at, revoked_at
+            FROM file_access_permissions
+            WHERE file_uuid = $1 AND user_id = $2 AND revoked_at IS NULL
+            "#,
+            file_uuid,
+            user_id
+        )
+        .fetch_optional(&self.db)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("无权访问此文件"))?;
+
+        // 3. 根据physical_file_key判断bucket
+        // physical_file_key格式: user_id/type/timestamp_hash_filename
+        let physical_file_key = &mapping.physical_file_key;
+        let bucket = if physical_file_key.contains("/images/") {
+            "user-file"
+        } else if physical_file_key.contains("/videos/") {
+            "user-file"
+        } else if physical_file_key.contains("/files/") {
+            "user-file"
+        } else {
+            // 默认使用user-file bucket
+            "user-file"
+        };
+
+        // 4. 生成预签名下载URL
+        let presigned_url = self
+            .s3_client
+            .generate_presigned_download_url(bucket, physical_file_key, expires_in)
+            .await?;
+
+        // 5. 计算过期时间
+        let expires_at = chrono::Utc::now() + chrono::Duration::seconds(expires_in as i64);
+        let expires_at_str = expires_at.to_rfc3339();
+
+        // 6. 生成警告信息（如果有效期超过1天）
+        let warning = if expires_in > 86400 {
+            Some(format!(
+                "此链接将在{}小时后过期",
+                expires_in / 3600
+            ))
+        } else {
+            None
+        };
+
+        Ok(PresignedUrlResponse {
+            presigned_url,
+            expires_at: expires_at_str,
+            file_uuid: file_uuid.to_string(),
+            file_size: mapping.file_size,
+            content_type: mapping.content_type,
+            warning,
+        })
+    }
 }
 
 /// 数据库文件记录结构
