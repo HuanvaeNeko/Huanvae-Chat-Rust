@@ -4,18 +4,37 @@ services:
   nginx:
     image: docker.io/library/nginx:1.29.3-alpine
     container_name: huanvae-nginx
-    network_mode: host
+    ports:
+      - "80:80"
+      - "443:443"
     volumes:
       - ./Nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./Nginx/conf.d:/etc/nginx/conf.d:ro
       - ./Nginx/ssl:/etc/nginx/ssl:ro
       - ./Nginx/logs:/var/log/nginx
+    networks:
+      - frontend
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     restart: unless-stopped
 
   postgres:
     image: docker.io/library/postgres:18.1-alpine
     container_name: huanvae-postgres
-    network_mode: host
+    ports:
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -23,18 +42,65 @@ services:
       PGDATA: /pgdata
     volumes:
       - ./PostgreSQL/data:/pgdata
-      - ./PostgreSQL/init:/docker-entrypoint-initdb.d
+      - ./PostgreSQL/init:/docker-entrypoint-initdb.d:ro
       - ./PostgreSQL/backup:/backup
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
 
   minio:
     image: docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: huanvae-minio
-    network_mode: host
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
     volumes:
       - ./MinIO/data:/data
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     restart: unless-stopped
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+    internal: true
+
+volumes:
+  postgres_data:
+    driver: local
+  minio_data:
+    driver: local

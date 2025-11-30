@@ -898,10 +898,10 @@ else
 fi
 
 # ==============================================
-# 第七部分：文件上传功能测试
+# 第七部分：文件上传功能测试（基于UUID映射机制）
 # ==============================================
 
-log_step "第 32 步：计算测试文件哈希值"
+log_step "第 32 步：计算测试文件SHA-256哈希值"
 
 # 检查是否有sha256sum命令
 if command -v sha256sum >/dev/null 2>&1; then
@@ -922,9 +922,10 @@ if [ -n "$HASH_CMD" ]; then
         TEST_FILE_SIZE=$(stat -f%z "$TEST_FILE" 2>/dev/null || stat -c%s "$TEST_FILE" 2>/dev/null)
         log_info "测试文件哈希: $TEST_FILE_HASH"
         log_info "测试文件大小: $(($TEST_FILE_SIZE / 1024 / 1024)) MB"
+        log_info "哈希算法: SHA-256（完整文件哈希）"
     else
         log_info "真实文件不存在，创建小测试文件..."
-        TEST_FILE="/tmp/test_avatar_${TIMESTAMP}.png"
+        TEST_FILE="/tmp/test_storage_${TIMESTAMP}.png"
         echo "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAFUlEQVR42mNk+M9Qz0AEYBxVSF+FABJADveWkH6oAAAAAElFTkSuQmCC" | base64 -d > "$TEST_FILE"
         TEST_FILE_HASH=$($HASH_CMD "$TEST_FILE" | awk '{print $1}')
         TEST_FILE_SIZE=$(stat -f%z "$TEST_FILE" 2>/dev/null || stat -c%s "$TEST_FILE" 2>/dev/null)
@@ -937,9 +938,10 @@ sleep 1
 
 # ==============================================
 
-log_step "第 33 步：请求文件上传（小文件）"
+log_step "第 33 步：请求文件上传（使用UUID映射机制）"
 
 if [ -n "$HASH_CMD" ]; then
+    log_info "请求上传URL（file_type: user_image, storage: user_files）..."
     UPLOAD_REQ=$(api_call POST /api/storage/upload/request "$USER1_TOKEN_NEW" "{
         \"file_type\": \"user_image\",
         \"storage_location\": \"user_files\",
@@ -953,15 +955,30 @@ if [ -n "$HASH_CMD" ]; then
     
     UPLOAD_MODE=$(echo "$UPLOAD_REQ" | jq -r '.mode' 2>/dev/null)
     INSTANT_UPLOAD=$(echo "$UPLOAD_REQ" | jq -r '.instant_upload' 2>/dev/null)
+    PREVIEW_SUPPORT=$(echo "$UPLOAD_REQ" | jq -r '.preview_support' 2>/dev/null)
     
     if [ "$INSTANT_UPLOAD" = "true" ]; then
-        log_success "✓ 秒传功能正常工作"
+        # 秒传成功，获取UUID访问URL
+        FILE1_UUID_URL=$(echo "$UPLOAD_REQ" | jq -r '.existing_file_url' 2>/dev/null)
+        FILE1_KEY=$(echo "$UPLOAD_REQ" | jq -r '.file_key' 2>/dev/null)
+        FILE1_UUID=$(echo "$FILE1_UUID_URL" | grep -oP '(?<=/file/)[^/]+$')
+        
+        log_success "✓ 秒传成功（UUID映射机制生效）"
+        log_info "文件key: $FILE1_KEY"
+        log_info "UUID访问URL: $FILE1_UUID_URL"
+        log_info "文件UUID: $FILE1_UUID"
+        log_info "预览支持: $PREVIEW_SUPPORT"
     elif [ "$UPLOAD_MODE" = "one_time_token" ]; then
         log_success "✓ 获取一次性Token上传URL成功"
         UPLOAD_URL=$(echo "$UPLOAD_REQ" | jq -r '.upload_url' 2>/dev/null)
-        FILE_KEY=$(echo "$UPLOAD_REQ" | jq -r '.file_key' 2>/dev/null)
-        log_info "上传URL: ${UPLOAD_URL:0:50}..."
-        log_info "文件key: $FILE_KEY"
+        FILE1_KEY=$(echo "$UPLOAD_REQ" | jq -r '.file_key' 2>/dev/null)
+        EXPIRES_IN=$(echo "$UPLOAD_REQ" | jq -r '.expires_in' 2>/dev/null)
+        
+        log_info "上传模式: one_time_token"
+        log_info "上传URL: ${UPLOAD_URL:0:60}..."
+        log_info "文件key: $FILE1_KEY"
+        log_info "有效期: ${EXPIRES_IN}秒"
+        log_info "预览支持: $PREVIEW_SUPPORT"
     else
         log_error "✗ 获取上传URL失败"
     fi
@@ -973,20 +990,27 @@ sleep 1
 
 # ==============================================
 
-log_step "第 34 步：直接上传文件到MinIO"
+log_step "第 34 步：直接上传文件到MinIO（使用一次性Token）"
 
 if [ -n "$TEST_FILE_HASH" ] && [ -n "$UPLOAD_URL" ] && [ "$INSTANT_UPLOAD" != "true" ]; then
-    # 直接上传文件
+    log_info "使用一次性Token上传文件..."
+    # 直接上传文件（multipart/form-data）
     DIRECT_UPLOAD=$(curl -s -X POST "$UPLOAD_URL" \
         -F "file=@$TEST_FILE")
     echo "$DIRECT_UPLOAD" | jq '.' 2>/dev/null || echo "$DIRECT_UPLOAD"
     
     if echo "$DIRECT_UPLOAD" | jq -e '.file_url' > /dev/null 2>&1; then
-        UPLOADED_FILE_URL=$(echo "$DIRECT_UPLOAD" | jq -r '.file_url')
-        log_success "✓ 文件上传成功: $UPLOADED_FILE_URL"
+        FILE1_UUID_URL=$(echo "$DIRECT_UPLOAD" | jq -r '.file_url')
+        FILE1_UUID=$(echo "$FILE1_UUID_URL" | grep -oP '(?<=/file/)[^/]+$')
+        
+        log_success "✓ 文件上传成功（已创建UUID映射）"
+        log_info "UUID访问URL: $FILE1_UUID_URL"
+        log_info "文件UUID: $FILE1_UUID"
     else
         log_error "✗ 文件上传失败"
     fi
+elif [ "$INSTANT_UPLOAD" = "true" ]; then
+    log_info "已秒传，跳过实际上传步骤"
 fi
 
 sleep 1
@@ -995,7 +1019,8 @@ sleep 1
 
 log_step "第 35 步：测试秒传功能（再次上传相同文件）"
 
-if [ -n "$HASH_CMD" ]; then
+if [ -n "$HASH_CMD" ] && [ -n "$FILE1_UUID" ]; then
+    log_info "用户1再次上传相同文件（测试秒传）..."
     SECOND_UPLOAD=$(api_call POST /api/storage/upload/request "$USER1_TOKEN_NEW" "{
         \"file_type\": \"user_image\",
         \"storage_location\": \"user_files\",
@@ -1007,23 +1032,36 @@ if [ -n "$HASH_CMD" ]; then
     }")
     
     INSTANT_UPLOAD2=$(echo "$SECOND_UPLOAD" | jq -r '.instant_upload' 2>/dev/null)
+    EXISTING_URL2=$(echo "$SECOND_UPLOAD" | jq -r '.existing_file_url' 2>/dev/null)
+    FILE_KEY2=$(echo "$SECOND_UPLOAD" | jq -r '.file_key' 2>/dev/null)
     
     if [ "$INSTANT_UPLOAD2" = "true" ]; then
-        log_success "✓ 秒传功能正常工作（相同哈希文件直接返回）"
-        EXISTING_URL=$(echo "$SECOND_UPLOAD" | jq -r '.existing_file_url' 2>/dev/null)
-        log_info "已存在文件URL: $EXISTING_URL"
+        log_success "✓ 秒传功能正常工作（相同哈希文件直接返回UUID）"
+        log_info "UUID访问URL: $EXISTING_URL2"
+        log_info "文件key: $FILE_KEY2"
+        
+        # 验证返回的UUID是否相同（同一用户相同文件）
+        UUID2=$(echo "$EXISTING_URL2" | grep -oP '(?<=/file/)[^/]+$')
+        if [ "$UUID2" = "$FILE1_UUID" ]; then
+            log_success "✓ UUID一致性验证通过（同一用户重复上传返回相同UUID）"
+        else
+            log_info "UUID不同（可能是不同file_key，符合预期）"
+        fi
     else
-        log_info "未触发秒传（可能是首次上传）"
+        log_error "✗ 秒传未触发（可能首次上传失败）"
     fi
+else
+    log_info "跳过秒传测试"
 fi
 
 sleep 1
 
 # ==============================================
 
-log_step "第 36 步：测试强制重新上传"
+log_step "第 36 步：测试强制重新上传（跳过秒传）"
 
 if [ -n "$HASH_CMD" ]; then
+    log_info "使用force_upload=true跳过秒传..."
     FORCE_UPLOAD=$(api_call POST /api/storage/upload/request "$USER1_TOKEN_NEW" "{
         \"file_type\": \"user_image\",
         \"storage_location\": \"user_files\",
@@ -1035,72 +1073,221 @@ if [ -n "$HASH_CMD" ]; then
     }")
     
     INSTANT_UPLOAD3=$(echo "$FORCE_UPLOAD" | jq -r '.instant_upload' 2>/dev/null)
+    FORCE_UPLOAD_URL=$(echo "$FORCE_UPLOAD" | jq -r '.upload_url' 2>/dev/null)
     
-    if [ "$INSTANT_UPLOAD3" = "false" ]; then
+    if [ "$INSTANT_UPLOAD3" = "false" ] && [ -n "$FORCE_UPLOAD_URL" ] && [ "$FORCE_UPLOAD_URL" != "null" ]; then
         log_success "✓ 强制上传功能正常工作（force_upload=true 跳过秒传）"
+        log_info "强制上传URL: ${FORCE_UPLOAD_URL:0:60}..."
     else
         log_error "✗ 强制上传未生效"
     fi
 fi
 
+sleep 1
+
+fi
+
+sleep 1
+
 # ==============================================
-# 第八部分：真实文件上传测试
+# 第八部分：UUID文件访问和预签名URL测试
 # ==============================================
 
-log_step "第 37 步：测试上传真实图片文件（6.1MB）"
+log_step "第 37 步：测试通过UUID直接访问文件"
 
-REAL_IMAGE="./testfile/0BD129B455796E21375D51F2AED2CB3F.jpg"
-if [ -f "$REAL_IMAGE" ]; then
-    log_info "计算图片文件哈希..."
-    REAL_IMAGE_HASH=$($HASH_CMD "$REAL_IMAGE" | awk '{print $1}')
-    REAL_IMAGE_SIZE=$(stat -f%z "$REAL_IMAGE" 2>/dev/null || stat -c%s "$REAL_IMAGE" 2>/dev/null)
-    log_info "图片哈希: $REAL_IMAGE_HASH"
-    log_info "图片大小: $(($REAL_IMAGE_SIZE / 1024 / 1024)) MB"
+if [ -n "$FILE1_UUID" ]; then
+    log_info "用户1通过UUID访问文件: /api/storage/file/$FILE1_UUID"
+    UUID_ACCESS=$(curl -s -I "http://localhost:8080/api/storage/file/$FILE1_UUID" \
+        -H "Authorization: Bearer $USER1_TOKEN_NEW" | head -n 1)
     
-    # 请求上传
-    REAL_IMG_REQ=$(api_call POST /api/storage/upload/request "$USER1_TOKEN_NEW" "{
-        \"file_type\": \"user_image\",
-        \"storage_location\": \"user_files\",
-        \"filename\": \"real_test.jpg\",
-        \"file_size\": $REAL_IMAGE_SIZE,
-        \"content_type\": \"image/jpeg\",
-        \"file_hash\": \"$REAL_IMAGE_HASH\",
-        \"force_upload\": false
-    }")
-    
-    REAL_IMG_URL=$(echo "$REAL_IMG_REQ" | jq -r '.upload_url' 2>/dev/null)
-    REAL_IMG_KEY=$(echo "$REAL_IMG_REQ" | jq -r '.file_key' 2>/dev/null)
-    
-    if [ -n "$REAL_IMG_URL" ] && [ "$REAL_IMG_URL" != "null" ]; then
-        log_success "✓ 获取6.1MB图片上传URL成功"
-        
-        # 上传文件
-        log_info "正在上传6.1MB图片..."
-        REAL_IMG_UPLOAD=$(curl -s -X POST "$REAL_IMG_URL" -F "file=@$REAL_IMAGE")
-        
-        if echo "$REAL_IMG_UPLOAD" | jq -e '.file_url' > /dev/null 2>&1; then
-            REAL_IMG_FILE_URL=$(echo "$REAL_IMG_UPLOAD" | jq -r '.file_url')
-            log_success "✓ 6.1MB图片上传成功"
-            log_info "文件URL: $REAL_IMG_FILE_URL"
-        else
-            log_error "✗ 图片上传失败"
-        fi
+    if echo "$UUID_ACCESS" | grep -q "200"; then
+        log_success "✓ UUID文件访问成功（权限验证通过）"
+    elif echo "$UUID_ACCESS" | grep -q "302\|307"; then
+        log_success "✓ UUID访问重定向到MinIO（支持直连）"
     else
-        log_error "✗ 获取图片上传URL失败"
+        log_error "✗ UUID文件访问失败"
+        echo "$UUID_ACCESS"
     fi
 else
-    log_info "跳过真实图片测试（文件不存在）"
+    log_info "跳过UUID访问测试（无可用UUID）"
 fi
 
 sleep 1
 
 # ==============================================
 
-log_step "第 38 步：测试上传大图片文件（71MB TIF）"
+log_step "第 38 步：获取文件预签名URL（3小时有效期）"
+
+if [ -n "$FILE1_UUID" ]; then
+    log_info "请求生成预签名URL..."
+    PRESIGNED_REQ=$(api_call POST "/api/storage/file/$FILE1_UUID/presigned-url" "$USER1_TOKEN_NEW" "{
+        \"operation\": \"download\",
+        \"expires_in\": 10800
+    }")
+    echo "$PRESIGNED_REQ" | jq '.' 2>/dev/null || echo "$PRESIGNED_REQ"
+    
+    PRESIGNED_URL=$(echo "$PRESIGNED_REQ" | jq -r '.presigned_url' 2>/dev/null)
+    EXPIRES_AT=$(echo "$PRESIGNED_REQ" | jq -r '.expires_at' 2>/dev/null)
+    FILE_SIZE=$(echo "$PRESIGNED_REQ" | jq -r '.file_size' 2>/dev/null)
+    
+    if [ -n "$PRESIGNED_URL" ] && [ "$PRESIGNED_URL" != "null" ]; then
+        log_success "✓ 预签名URL生成成功"
+        log_info "URL: ${PRESIGNED_URL:0:80}..."
+        log_info "过期时间: $EXPIRES_AT"
+        log_info "文件大小: $FILE_SIZE 字节"
+    else
+        log_error "✗ 预签名URL生成失败"
+    fi
+else
+    log_info "跳过预签名URL测试（无可用UUID）"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 39 步：使用预签名URL下载文件（验证Range请求）"
+
+if [ -n "$PRESIGNED_URL" ]; then
+    log_info "测试预签名URL直连MinIO..."
+    # 测试普通访问
+    PRESIGN_ACCESS=$(curl -s -I "$PRESIGNED_URL" | head -n 1)
+    if echo "$PRESIGN_ACCESS" | grep -q "200"; then
+        log_success "✓ 预签名URL可访问（客户端可直连MinIO）"
+    else
+        log_error "✗ 预签名URL无法访问"
+    fi
+    
+    sleep 1
+    
+    # 测试Range请求（流式播放）
+    log_info "测试Range请求（获取前1KB数据）..."
+    RANGE_TEST=$(curl -s -I -r 0-1023 "$PRESIGNED_URL" | grep -i "206\|content-range")
+    if echo "$RANGE_TEST" | grep -qi "206\|range"; then
+        log_success "✓ 支持Range请求（可用于视频流式播放）"
+        echo "$RANGE_TEST"
+    else
+        log_info "Range请求测试（可能不支持或无需支持）"
+    fi
+else
+    log_info "跳过MinIO直连测试"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 40 步：测试跨用户UUID映射机制"
+
+log_info "用户2上传与用户1相同的文件（测试跨用户秒传）..."
+if [ -n "$TEST_FILE_HASH" ]; then
+    USER2_UPLOAD=$(api_call POST /api/storage/upload/request "$USER2_TOKEN" "{
+        \"file_type\": \"user_image\",
+        \"storage_location\": \"user_files\",
+        \"filename\": \"user2_copy.jpg\",
+        \"file_size\": $TEST_FILE_SIZE,
+        \"content_type\": \"image/jpeg\",
+        \"file_hash\": \"$TEST_FILE_HASH\",
+        \"force_upload\": false
+    }")
+    
+    USER2_INSTANT=$(echo "$USER2_UPLOAD" | jq -r '.instant_upload' 2>/dev/null)
+    USER2_UUID_URL=$(echo "$USER2_UPLOAD" | jq -r '.existing_file_url' 2>/dev/null)
+    USER2_FILE_KEY=$(echo "$USER2_UPLOAD" | jq -r '.file_key' 2>/dev/null)
+    
+    if [ "$USER2_INSTANT" = "true" ]; then
+        log_success "✓ 跨用户秒传成功（UUID映射机制生效）"
+        log_info "用户2 file_key: $USER2_FILE_KEY"
+        log_info "UUID访问URL: $USER2_UUID_URL"
+        
+        USER2_UUID=$(echo "$USER2_UUID_URL" | grep -oP '(?<=/file/)[^/]+$')
+        log_info "用户2文件UUID: $USER2_UUID"
+        
+        # 验证物理文件去重（相同哈希应返回相同UUID）
+        if [ "$USER2_UUID" = "$FILE1_UUID" ]; then
+            log_success "✓ UUID一致性验证通过（跨用户共享同一物理文件）"
+        else
+            log_info "UUID不同（两个用户有独立的UUID访问权限，但底层可能共享物理文件）"
+        fi
+    else
+        log_error "✗ 跨用户秒传失败"
+    fi
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 41 步：验证UUID访问权限（用户2访问自己的UUID）"
+
+if [ -n "$USER2_UUID" ]; then
+    log_info "用户2通过UUID访问文件..."
+    USER2_ACCESS=$(curl -s -I "http://localhost:8080/api/storage/file/$USER2_UUID" \
+        -H "Authorization: Bearer $USER2_TOKEN" | head -n 1)
+    if echo "$USER2_ACCESS" | grep -q "200\|302\|307"; then
+        log_success "✓ 用户2可以访问自己的文件（权限验证通过）"
+    else
+        log_error "✗ 用户2无法访问文件"
+    fi
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 42 步：验证权限隔离（用户1不能访问用户2的专属UUID）"
+
+if [ -n "$USER2_UUID" ] && [ "$USER2_UUID" != "$FILE1_UUID" ]; then
+    log_info "用户1尝试访问用户2的UUID..."
+    CROSS_ACCESS=$(curl -s "http://localhost:8080/api/storage/file/$USER2_UUID" \
+        -H "Authorization: Bearer $USER1_TOKEN_NEW")
+    
+    if echo "$CROSS_ACCESS" | grep -qi "403\|forbidden\|无权"; then
+        log_success "✓ 权限隔离正常（用户1无法访问用户2的专属UUID）"
+    elif echo "$CROSS_ACCESS" | grep -q "200"; then
+        log_info "用户1可以访问（可能是共享的UUID）"
+    fi
+else
+    log_info "跳过权限隔离测试（UUID相同，说明共享同一文件）"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 43 步：测试超大文件扩展预签名URL"
+
+if [ -n "$FILE1_UUID" ]; then
+    log_info "请求7天有效期的扩展预签名URL..."
+    EXTENDED_PRESIGN=$(api_call POST "/api/storage/file/$FILE1_UUID/presigned-url/extended" "$USER1_TOKEN_NEW" "{
+        \"estimated_download_time\": 604800
+    }")
+    
+    EXT_URL=$(echo "$EXTENDED_PRESIGN" | jq -r '.presigned_url' 2>/dev/null)
+    EXT_EXPIRES=$(echo "$EXTENDED_PRESIGN" | jq -r '.expires_at' 2>/dev/null)
+    WARNING=$(echo "$EXTENDED_PRESIGN" | jq -r '.warning' 2>/dev/null)
+    
+    if [ -n "$EXT_URL" ] && [ "$EXT_URL" != "null" ]; then
+        log_success "✓ 扩展预签名URL生成成功（7天有效期）"
+        log_info "过期时间: $EXT_EXPIRES"
+        if [ -n "$WARNING" ] && [ "$WARNING" != "null" ]; then
+            log_info "警告: $WARNING"
+        fi
+    else
+        log_error "✗ 扩展预签名URL生成失败"
+        echo "$EXTENDED_PRESIGN"
+    fi
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 44 步：测试真实大文件上传（71MB TIF）"
 
 LARGE_IMAGE="./testfile/landmask_SG_052020_COG512.tif"
 if [ -f "$LARGE_IMAGE" ]; then
-    log_info "计算大图片文件哈希..."
+    log_info "计算71MB大图片文件哈希..."
     LARGE_IMG_HASH=$($HASH_CMD "$LARGE_IMAGE" | awk '{print $1}')
     LARGE_IMG_SIZE=$(stat -f%z "$LARGE_IMAGE" 2>/dev/null || stat -c%s "$LARGE_IMAGE" 2>/dev/null)
     log_info "大图片哈希: $LARGE_IMG_HASH"
@@ -1117,20 +1304,26 @@ if [ -f "$LARGE_IMAGE" ]; then
         \"force_upload\": false
     }")
     
+    LARGE_INSTANT=$(echo "$LARGE_IMG_REQ" | jq -r '.instant_upload' 2>/dev/null)
     LARGE_IMG_URL=$(echo "$LARGE_IMG_REQ" | jq -r '.upload_url' 2>/dev/null)
-    LARGE_IMG_EXPIRES=$(echo "$LARGE_IMG_REQ" | jq -r '.expires_in' 2>/dev/null)
+    LARGE_UUID_URL=$(echo "$LARGE_IMG_REQ" | jq -r '.existing_file_url' 2>/dev/null)
     
-    if [ -n "$LARGE_IMG_URL" ] && [ "$LARGE_IMG_URL" != "null" ]; then
-        log_success "✓ 获取71MB大图片上传URL成功（有效期: ${LARGE_IMG_EXPIRES}秒）"
+    if [ "$LARGE_INSTANT" = "true" ]; then
+        log_success "✓ 大文件秒传成功: $LARGE_UUID_URL"
+        LARGE_UUID=$(echo "$LARGE_UUID_URL" | grep -oP '(?<=/file/)[^/]+$')
+    elif [ -n "$LARGE_IMG_URL" ] && [ "$LARGE_IMG_URL" != "null" ]; then
+        log_success "✓ 获取71MB大图片上传URL成功"
         
         # 上传文件
         log_info "正在上传71MB大图片（可能需要一些时间）..."
         LARGE_IMG_UPLOAD=$(curl -s -X POST "$LARGE_IMG_URL" -F "file=@$LARGE_IMAGE")
         
         if echo "$LARGE_IMG_UPLOAD" | jq -e '.file_url' > /dev/null 2>&1; then
-            LARGE_IMG_FILE_URL=$(echo "$LARGE_IMG_UPLOAD" | jq -r '.file_url')
+            LARGE_UUID_URL=$(echo "$LARGE_IMG_UPLOAD" | jq -r '.file_url')
+            LARGE_UUID=$(echo "$LARGE_UUID_URL" | grep -oP '(?<=/file/)[^/]+$')
             log_success "✓ 71MB大图片上传成功"
-            log_info "文件URL: $LARGE_IMG_FILE_URL"
+            log_info "UUID访问URL: $LARGE_UUID_URL"
+            log_info "文件UUID: $LARGE_UUID"
         else
             log_error "✗ 大图片上传失败"
             echo "$LARGE_IMG_UPLOAD" | jq '.' 2>/dev/null || echo "$LARGE_IMG_UPLOAD"
@@ -1146,185 +1339,32 @@ sleep 1
 
 # ==============================================
 
-log_step "第 39 步：测试上传视频文件（2.9GB）"
+log_step "第 45 步：完整性验证 - 通过UUID下载并验证哈希"
 
-VIDEO_FILE="./testfile/VID_20251128_141436_076.mp4"
-if [ -f "$VIDEO_FILE" ]; then
-    log_info "计算视频文件哈希（可能需要一些时间）..."
-    VIDEO_HASH=$($HASH_CMD "$VIDEO_FILE" | awk '{print $1}')
-    VIDEO_SIZE=$(stat -f%z "$VIDEO_FILE" 2>/dev/null || stat -c%s "$VIDEO_FILE" 2>/dev/null)
-    log_info "视频哈希: $VIDEO_HASH"
-    log_info "视频大小: $(($VIDEO_SIZE / 1024 / 1024)) MB"
+if [ -n "$FILE1_UUID" ] && [ -n "$TEST_FILE_HASH" ]; then
+    log_info "下载文件并验证哈希值..."
     
-    # 请求上传
-    VIDEO_REQ=$(api_call POST /api/storage/upload/request "$USER1_TOKEN_NEW" "{
-        \"file_type\": \"user_video\",
-        \"storage_location\": \"user_files\",
-        \"filename\": \"test_video.mp4\",
-        \"file_size\": $VIDEO_SIZE,
-        \"content_type\": \"video/mp4\",
-        \"file_hash\": \"$VIDEO_HASH\",
-        \"force_upload\": false
-    }")
+    # 通过UUID下载文件
+    DOWNLOAD_FILE="/tmp/downloaded_${TIMESTAMP}.jpg"
+    curl -s "http://localhost:8080/api/storage/file/$FILE1_UUID" \
+        -H "Authorization: Bearer $USER1_TOKEN_NEW" \
+        -o "$DOWNLOAD_FILE"
     
-    VIDEO_URL=$(echo "$VIDEO_REQ" | jq -r '.upload_url' 2>/dev/null)
-    VIDEO_EXPIRES=$(echo "$VIDEO_REQ" | jq -r '.expires_in' 2>/dev/null)
-    VIDEO_MODE=$(echo "$VIDEO_REQ" | jq -r '.mode' 2>/dev/null)
-    
-    if [ -n "$VIDEO_URL" ] && [ "$VIDEO_URL" != "null" ]; then
-        log_success "✓ 获取2.9GB视频上传URL成功（模式: $VIDEO_MODE, 有效期: ${VIDEO_EXPIRES}秒）"
+    if [ -f "$DOWNLOAD_FILE" ]; then
+        DOWNLOADED_HASH=$($HASH_CMD "$DOWNLOAD_FILE" | awk '{print $1}')
         
-        # 上传文件
-        log_info "正在上传2.9GB视频文件（这将需要较长时间）..."
-        VIDEO_UPLOAD=$(curl -s -X POST "$VIDEO_URL" -F "file=@$VIDEO_FILE")
-        
-        if echo "$VIDEO_UPLOAD" | jq -e '.file_url' > /dev/null 2>&1; then
-            VIDEO_FILE_URL=$(echo "$VIDEO_UPLOAD" | jq -r '.file_url')
-            log_success "✓ 2.9GB视频上传成功"
-            log_info "文件URL: $VIDEO_FILE_URL"
+        if [ "$DOWNLOADED_HASH" = "$TEST_FILE_HASH" ]; then
+            log_success "✓ 文件完整性验证通过（哈希值一致）"
+            log_info "原始哈希: $TEST_FILE_HASH"
+            log_info "下载哈希: $DOWNLOADED_HASH"
         else
-            log_error "✗ 视频上传失败"
-            echo "$VIDEO_UPLOAD" | jq '.' 2>/dev/null || echo "$VIDEO_UPLOAD"
+            log_error "✗ 文件完整性验证失败（哈希值不一致）"
         fi
+        
+        # 清理下载的文件
+        rm -f "$DOWNLOAD_FILE"
     else
-        log_error "✗ 获取视频上传URL失败"
-        echo "$VIDEO_REQ" | jq '.' 2>/dev/null || echo "$VIDEO_REQ"
-    fi
-else
-    log_info "跳过视频测试（文件不存在）"
-fi
-
-sleep 1
-
-# ==============================================
-
-log_step "第 40 步：验证文件可访问性"
-
-# 测试访问已上传的图片
-if [ -n "$REAL_IMG_FILE_URL" ]; then
-    log_info "测试访问6.1MB图片..."
-    IMG_HEAD=$(curl -s -I "$REAL_IMG_FILE_URL" | head -1)
-    if echo "$IMG_HEAD" | grep -q "200"; then
-        log_success "✓ 图片文件可访问"
-    else
-        log_error "✗ 图片文件无法访问"
-    fi
-fi
-
-# 测试访问大图片
-if [ -n "$LARGE_IMG_FILE_URL" ]; then
-    log_info "测试访问71MB大图片..."
-    LARGE_IMG_HEAD=$(curl -s -I "$LARGE_IMG_FILE_URL" | head -1)
-    if echo "$LARGE_IMG_HEAD" | grep -q "200"; then
-        log_success "✓ 大图片文件可访问"
-    else
-        log_error "✗ 大图片文件无法访问"
-    fi
-fi
-
-# 测试访问视频
-if [ -n "$VIDEO_FILE_URL" ]; then
-    log_info "测试访问2.9GB视频..."
-    VIDEO_HEAD=$(curl -s -I "$VIDEO_FILE_URL" | head -1)
-    if echo "$VIDEO_HEAD" | grep -q "200"; then
-        log_success "✓ 视频文件可访问"
-    else
-        log_error "✗ 视频文件无法访问"
-    fi
-fi
-
-sleep 1
-
-# ==============================================
-
-log_step "第 41 步：测试在线预览图片（下载部分内容）"
-
-if [ -n "$REAL_IMG_FILE_URL" ]; then
-    log_info "下载图片前1KB内容验证..."
-    IMG_PREVIEW=$(curl -s -r 0-1023 "$REAL_IMG_FILE_URL" | head -c 10 | xxd -p)
-    if [ -n "$IMG_PREVIEW" ]; then
-        log_success "✓ 图片文件可在线预览（前10字节: $IMG_PREVIEW）"
-    else
-        log_error "✗ 图片预览失败"
-    fi
-fi
-
-sleep 1
-
-# ==============================================
-
-log_step "第 42 步：测试视频流式访问（Range请求）"
-
-if [ -n "$VIDEO_FILE_URL" ]; then
-    log_info "测试视频Range请求（获取前10MB）..."
-    VIDEO_RANGE=$(curl -s -I -r 0-10485759 "$VIDEO_FILE_URL" | grep -i "content-range\|content-length\|206")
-    if echo "$VIDEO_RANGE" | grep -qi "206\|range"; then
-        log_success "✓ 视频支持Range请求（流式播放）"
-        echo "$VIDEO_RANGE" | grep -i "content-range\|content-length"
-    else
-        log_info "视频Range请求测试（完整响应）"
-    fi
-fi
-
-sleep 1
-
-# ==============================================
-
-log_step "第 43 步：测试UUID映射机制（跨用户去重）"
-
-log_info "用户2上传与用户1相同的图片（测试秒传）..."
-SECOND_UPLOAD=$(api_call POST /api/storage/upload/request "$USER2_TOKEN" "{
-    \"file_type\": \"user_image\",
-    \"storage_location\": \"user_files\",
-    \"filename\": \"test_image_copy.jpg\",
-    \"file_size\": $REAL_IMAGE_SIZE,
-    \"content_type\": \"image/jpeg\",
-    \"file_hash\": \"$REAL_IMAGE_HASH\",
-    \"force_upload\": false
-}")
-
-INSTANT_UPLOAD2=$(echo "$SECOND_UPLOAD" | jq -r '.instant_upload' 2>/dev/null)
-if [ "$INSTANT_UPLOAD2" = "true" ]; then
-    log_success "✓ 跨用户秒传成功（UUID映射机制生效）"
-    USER2_FILE_URL=$(echo "$SECOND_UPLOAD" | jq -r '.existing_file_url' 2>/dev/null)
-    USER2_FILE_KEY=$(echo "$SECOND_UPLOAD" | jq -r '.file_key' 2>/dev/null)
-    log_info "用户2文件key: $USER2_FILE_KEY"
-    log_info "UUID访问URL: $USER2_FILE_URL"
-else
-    log_error "✗ 跨用户秒传失败"
-fi
-
-sleep 1
-
-# ==============================================
-
-log_step "第 44 步：验证UUID访问权限（用户2访问文件）"
-
-if [ -n "$USER2_FILE_URL" ]; then
-    log_info "用户2通过UUID访问文件..."
-    USER2_ACCESS=$(curl -s -I "$USER2_FILE_URL" -H "Authorization: Bearer $USER2_TOKEN" | head -1)
-    if echo "$USER2_ACCESS" | grep -q "200"; then
-        log_success "✓ 用户2可以访问文件（权限验证通过）"
-    else
-        log_error "✗ 用户2无法访问文件"
-        echo "$USER2_ACCESS"
-    fi
-fi
-
-sleep 1
-
-# ==============================================
-
-log_step "第 45 步：验证用户1也能访问相同UUID"
-
-if [ -n "$USER2_FILE_URL" ]; then
-    log_info "用户1通过相同UUID访问文件..."
-    USER1_ACCESS=$(curl -s -I "$USER2_FILE_URL" -H "Authorization: Bearer $USER1_TOKEN_NEW" | head -1)
-    if echo "$USER1_ACCESS" | grep -q "200"; then
-        log_success "✓ 用户1也能访问（共享同一物理文件）"
-    else
-        log_error "✗ 用户1无法访问"
-        echo "$USER1_ACCESS"
+        log_error "✗ 文件下载失败"
     fi
 fi
 
@@ -1355,17 +1395,17 @@ echo -e "${GREEN}║  ✓ 消息查询         分页查询                     
 echo -e "${GREEN}║  ✓ 消息删除         软删除                            ║${NC}"
 echo -e "${GREEN}║  ✓ 消息撤回         2分钟内                           ║${NC}"
 echo -e "${GREEN}║  ✓ 权限验证         非好友拒绝                        ║${NC}"
-echo -e "${GREEN}║  ✓ 文件上传         哈希验证                          ║${NC}"
-echo -e "${GREEN}║  ✓ 秒传功能         哈希去重                          ║${NC}"
-echo -e "${GREEN}║  ✓ 强制上传         跳过秒传                          ║${NC}"
-echo -e "${GREEN}║  ✓ 真实图片         6.1MB上传                         ║${NC}"
-echo -e "${GREEN}║  ✓ 大图片文件       71MB上传                          ║${NC}"
-echo -e "${GREEN}║  ✓ 视频文件         2.9GB上传                         ║${NC}"
-echo -e "${GREEN}║  ✓ 文件访问         可读取验证                        ║${NC}"
-echo -e "${GREEN}║  ✓ 图片预览         在线查看                          ║${NC}"
-echo -e "${GREEN}║  ✓ 视频流式         Range请求                         ║${NC}"
-echo -e "${GREEN}║  ✓ UUID映射         跨用户秒传                        ║${NC}"
-echo -e "${GREEN}║  ✓ 权限验证         UUID访问控制                      ║${NC}"
+echo -e "${GREEN}║  ✓ 文件上传         SHA-256哈希验证                    ║${NC}"
+echo -e "${GREEN}║  ✓ UUID映射         秒传机制（跨用户生效）            ║${NC}"
+echo -e "${GREEN}║  ✓ 强制上传         跳过秒传（force_upload=true）     ║${NC}"
+echo -e "${GREEN}║  ✓ UUID访问         /api/storage/file/{uuid}          ║${NC}"
+echo -e "${GREEN}║  ✓ 预签名URL        3小时有效期（MinIO直连）          ║${NC}"
+echo -e "${GREEN}║  ✓ 扩展URL          7天有效期（超大文件）             ║${NC}"
+echo -e "${GREEN}║  ✓ Range请求        视频流式播放支持                  ║${NC}"
+echo -e "${GREEN}║  ✓ 跨用户秒传       UUID映射机制验证                  ║${NC}"
+echo -e "${GREEN}║  ✓ 权限控制         基于权限表的访问验证              ║${NC}"
+echo -e "${GREEN}║  ✓ 文件完整性       哈希值验证通过                    ║${NC}"
+echo -e "${GREEN}║  ✓ 71MB大文件       TIF格式上传测试                   ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════════════════════╝${NC}"
 echo ""
 

@@ -313,18 +313,43 @@ await fetch('http://localhost:8080/api/auth/logout', {
 创建 `.env` 文件：
 
 ```bash
-# 数据库
+# ========================================
+# 数据库配置
+# ========================================
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/huanvae_chat
 
+# 数据库连接池配置（可选，已提供合理默认值）
+DB_MAX_CONNECTIONS=20        # 最大连接数，推荐: CPU核心数 × 4
+DB_MIN_CONNECTIONS=5         # 最小连接数，保持热连接
+DB_ACQUIRE_TIMEOUT=30        # 获取连接超时（秒）
+DB_IDLE_TIMEOUT=600          # 空闲连接超时（秒，10分钟）
+DB_MAX_LIFETIME=1800         # 连接最大生命周期（秒，30分钟）
+
+# ========================================
 # JWT 密钥
+# ========================================
 JWT_PRIVATE_KEY_PATH=./keys/rsa_private.pem
 JWT_PUBLIC_KEY_PATH=./keys/rsa_public.pem
 
-# 服务器
-SERVER_HOST=0.0.0.0
-SERVER_PORT=3000
+# ========================================
+# 服务器配置
+# ========================================
+APP_HOST=0.0.0.0
+APP_PORT=8080
+APP_BASE_URL=http://localhost:8080
 
+# ========================================
+# CORS 跨域配置
+# ========================================
+# 开发环境：允许所有来源（使用 * ）
+# CORS_ALLOWED_ORIGINS=*
+
+# 生产环境：明确指定允许的来源（多个用逗号分隔）
+CORS_ALLOWED_ORIGINS=http://localhost:3000,https://yourdomain.com,https://www.yourdomain.com
+
+# ========================================
 # MinIO 对象存储
+# ========================================
 MINIO_ENDPOINT=http://localhost:9000
 MINIO_ACCESS_KEY=minioadmin
 MINIO_SECRET_KEY=minioadmin123
@@ -332,9 +357,34 @@ MINIO_BUCKET_AVATARS=avatars
 MINIO_PUBLIC_URL=http://localhost:9000
 MINIO_REGION=us-east-1
 
-# 日志
-RUST_LOG=info,huanvae_chat=debug
+# ========================================
+# 日志配置
+# ========================================
+RUST_LOG=info,sqlx=warn,hyper=info
 ```
+
+### 环境变量说明
+
+#### 数据库连接池配置
+
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `DB_MAX_CONNECTIONS` | 20 | 连接池最大连接数，建议根据CPU核心数调整 |
+| `DB_MIN_CONNECTIONS` | 5 | 连接池最小连接数，保持热连接提升性能 |
+| `DB_ACQUIRE_TIMEOUT` | 30 | 获取连接的超时时间（秒） |
+| `DB_IDLE_TIMEOUT` | 600 | 空闲连接回收时间（秒） |
+| `DB_MAX_LIFETIME` | 1800 | 连接的最大生命周期（秒） |
+
+#### CORS 跨域配置
+
+| 变量名 | 示例值 | 说明 |
+|--------|--------|------|
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,https://yourdomain.com` | 允许的跨域来源，多个用逗号分隔。使用 `*` 允许所有来源（仅限开发环境） |
+
+**安全建议：**
+- ⚠️ 生产环境**必须**明确指定允许的域名，**禁止**使用 `*`
+- ✅ 开发环境可以使用 `*` 简化调试
+- ✅ 支持多个域名，用逗号分隔
 
 ## 🔧 开发
 
