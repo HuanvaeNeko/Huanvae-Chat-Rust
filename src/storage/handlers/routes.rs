@@ -13,6 +13,7 @@ use crate::storage::handlers::upload::*;
 use crate::storage::handlers::file_access::{
     generate_presigned_url, generate_extended_presigned_url,
 };
+use crate::storage::handlers::file_query::list_files_handler;
 
 /// 创建storage路由
 pub fn create_storage_routes(
@@ -35,10 +36,19 @@ pub fn create_storage_routes(
         .layer(DefaultBodyLimit::max(30 * 1024 * 1024 * 1024)) // 30GB
         .with_state(storage_state.clone());
     
-    // 预签名URL路由（新增）
+    // 预签名URL路由
     let presigned_router = Router::new()
         .route("/file/{uuid}/presigned-url", post(generate_presigned_url))
         .route("/file/{uuid}/presigned-url/extended", post(generate_extended_presigned_url))
+        .route_layer(middleware::from_fn_with_state(
+            auth_state.clone(),
+            crate::auth::middleware::auth_guard,
+        ))
+        .with_state(storage_state.clone());
+    
+    // 文件查询路由
+    let query_router = Router::new()
+        .route("/files", get(list_files_handler))
         .route_layer(middleware::from_fn_with_state(
             auth_state,
             crate::auth::middleware::auth_guard,
@@ -46,6 +56,8 @@ pub fn create_storage_routes(
         .with_state(storage_state);
     
     // 合并路由
-    upload_router.merge(presigned_router)
+    upload_router
+        .merge(presigned_router)
+        .merge(query_router)
 }
 

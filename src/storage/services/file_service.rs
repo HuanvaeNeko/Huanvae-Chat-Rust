@@ -1,6 +1,7 @@
 use anyhow::Result;
 use chrono::Utc;
 use sqlx::PgPool;
+use sqlx::Row;
 use std::sync::Arc;
 use tracing::info;
 
@@ -553,6 +554,114 @@ impl FileService {
             content_type: mapping.content_type,
             warning,
         })
+    }
+
+    /// 查询用户文件列表（支持分页、过滤、排序）
+    pub async fn list_user_files(
+        &self,
+        user_id: &str,
+        page: i32,
+        limit: i32,
+        sort_by: String,
+        sort_order: String,
+    ) -> Result<FileListResponse> {
+        // 1. 参数验证
+        let page = page.max(1);
+        let limit = limit.clamp(1, 100);
+        let offset = (page - 1) * limit;
+        
+        // 2. 确定排序字段
+        let sort_column = match sort_by.as_str() {
+            "file_size" => "m.file_size",
+            _ => "m.created_at",
+        };
+        let sort_dir = if sort_order == "asc" { "ASC" } else { "DESC" };
+        
+        // 3. 查询总数
+        let total: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*) as count
+            FROM file_uuid_mapping m
+            INNER JOIN file_access_permissions p ON m.uuid = p.file_uuid
+            WHERE p.user_id = $1 AND p.revoked_at IS NULL
+            "#
+        )
+        .bind(user_id)
+        .fetch_one(&self.db)
+        .await?;
+        
+        // 4. 构建查询SQL
+        let query_sql = format!(
+            r#"
+            SELECT 
+                m.uuid, m.physical_file_key, m.file_size, 
+                m.content_type, m.preview_support, m.created_at
+            FROM file_uuid_mapping m
+            INNER JOIN file_access_permissions p ON m.uuid = p.file_uuid
+            WHERE p.user_id = $1 AND p.revoked_at IS NULL
+            ORDER BY {} {}
+            LIMIT $2 OFFSET $3
+            "#,
+            sort_column, sort_dir
+        );
+        
+        // 5. 执行查询
+        let rows = sqlx::query(&query_sql)
+            .bind(user_id)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.db)
+            .await?;
+        
+        // 6. 转换为响应格式
+        let files: Vec<FileItem> = rows
+            .into_iter()
+            .map(|row| {
+                let uuid: String = row.try_get("uuid").unwrap_or_default();
+                let physical_key: String = row.try_get("physical_file_key").unwrap_or_default();
+                let filename = Self::extract_filename_from_key(&physical_key);
+                
+                FileItem {
+                    file_uuid: uuid.clone(),
+                    filename,
+                    file_size: row.try_get("file_size").unwrap_or(0),
+                    content_type: row.try_get("content_type").unwrap_or_default(),
+                    preview_support: row.try_get("preview_support").unwrap_or_default(),
+                    created_at: row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+                        .map(|dt| dt.to_rfc3339())
+                        .unwrap_or_default(),
+                    file_url: format!("{}/api/storage/file/{}", self.api_base_url, uuid),
+                }
+            })
+            .collect();
+        
+        // 7. 计算分页信息
+        let total_pages = ((total as f64) / (limit as f64)).ceil() as i32;
+        let has_more = page < total_pages;
+        
+        Ok(FileListResponse {
+            files,
+            total,
+            page,
+            page_size: limit,
+            total_pages,
+            has_more,
+        })
+    }
+    
+    /// 从file_key中提取原始文件名
+    fn extract_filename_from_key(file_key: &str) -> String {
+        // file_key格式: user_id/type/timestamp_hash_filename.ext
+        // 提取最后的filename部分
+        file_key
+            .split('/')
+            .last()
+            .and_then(|s| {
+                // 去除 timestamp_hash_ 前缀
+                let parts: Vec<&str> = s.splitn(3, '_').collect();
+                parts.get(2).map(|s| s.to_string())
+            })
+            .unwrap_or_else(|| "unknown".to_string())
     }
 }
 

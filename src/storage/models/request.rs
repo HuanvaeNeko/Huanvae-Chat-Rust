@@ -66,3 +66,25 @@ pub struct PresignedUrlRequest {
     pub estimated_download_time: Option<u32>,
 }
 
+/// 文件列表查询请求
+#[derive(Debug, Deserialize)]
+pub struct FileListQuery {
+    /// 文件类型过滤（可选）
+    pub file_type: Option<String>,
+    
+    /// 存储位置过滤（可选）
+    pub storage_location: Option<String>,
+    
+    /// 页码（从1开始，默认1）
+    pub page: Option<i32>,
+    
+    /// 每页数量（默认20，最大100）
+    pub limit: Option<i32>,
+    
+    /// 排序字段（created_at, file_size）
+    pub sort_by: Option<String>,
+    
+    /// 排序方向（asc, desc）
+    pub sort_order: Option<String>,
+}
+

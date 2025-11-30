@@ -299,6 +299,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("  POST /api/storage/upload/request   - 请求文件上传");
     tracing::info!("  POST /api/storage/upload/direct    - 直接上传文件");
     tracing::info!("  GET  /api/storage/multipart/part-url - 获取分片URL");
+    tracing::info!("  GET  /api/storage/files             - 查询个人文件列表");
 
     axum::serve(listener, app).await?;
 

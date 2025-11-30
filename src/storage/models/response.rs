@@ -81,3 +81,50 @@ pub struct PresignedUrlResponse {
     pub warning: Option<String>,
 }
 
+/// 文件列表项
+#[derive(Debug, Serialize)]
+pub struct FileItem {
+    /// 文件UUID（访问标识）
+    pub file_uuid: String,
+    
+    /// 原始文件名
+    pub filename: String,
+    
+    /// 文件大小（字节）
+    pub file_size: i64,
+    
+    /// 文件类型（MIME）
+    pub content_type: String,
+    
+    /// 预览支持
+    pub preview_support: String,
+    
+    /// 创建时间
+    pub created_at: String,
+    
+    /// 文件URL（UUID格式）
+    pub file_url: String,
+}
+
+/// 文件列表响应
+#[derive(Debug, Serialize)]
+pub struct FileListResponse {
+    /// 文件列表
+    pub files: Vec<FileItem>,
+    
+    /// 总数
+    pub total: i64,
+    
+    /// 当前页
+    pub page: i32,
+    
+    /// 每页数量
+    pub page_size: i32,
+    
+    /// 总页数
+    pub total_pages: i32,
+    
+    /// 是否有更多
+    pub has_more: bool,
+}
+
