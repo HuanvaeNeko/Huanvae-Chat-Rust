@@ -1,8 +1,9 @@
 use axum::{extract::{State, Request}, Json};
 use crate::friends::models::{ListResponse, SentRequestDto};
-use crate::friends::services::parse_records;
 use crate::auth::{errors::AuthError, middleware::extract_auth_context};
 use sqlx::PgPool;
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct ListState { pub db: PgPool }
@@ -12,22 +13,26 @@ pub async fn list_sent_requests_handler(
     request: Request,
 ) -> Result<Json<ListResponse<SentRequestDto>>, AuthError> {
     let auth = extract_auth_context(&request)?;
-    let (sent_text,): (String,) = sqlx::query_as(
-        r#"SELECT "user-sent-friend-requests" FROM "users" WHERE "user-id" = $1"#,
+    
+    // 查询我发出的待处理好友请求
+    let requests: Vec<(Uuid, String, String, DateTime<Utc>)> = sqlx::query_as(
+        r#"SELECT id, to_user_id, message, "created-at"
+           FROM friend_requests
+           WHERE from_user_id = $1 AND status = 'pending'
+           ORDER BY "created-at" DESC"#,
     )
     .bind(&auth.user_id)
-    .fetch_one(&state.db)
+    .fetch_all(&state.db)
     .await
-    .map_err(|_| AuthError::InvalidToken)?;
+    .map_err(|_| AuthError::InternalServerError)?;
 
-    let items = parse_records(&sent_text)
+    let items = requests
         .into_iter()
-        .filter(|r| r.get("status").map(|s| s == "open").unwrap_or(true))
-        .map(|r| SentRequestDto {
-            request_id: r.get("request-id").cloned().unwrap_or_default(),
-            sent_to_user_id: r.get("sent-to-user-id").cloned().unwrap_or_default(),
-            sent_message: r.get("sent-message").cloned(),
-            sent_time: r.get("sent-time").cloned().unwrap_or_default(),
+        .map(|(id, to_user_id, message, created_at)| SentRequestDto {
+            request_id: id.to_string(),
+            sent_to_user_id: to_user_id,
+            sent_message: if message.is_empty() { None } else { Some(message) },
+            sent_time: created_at.to_rfc3339(),
         })
         .collect();
 

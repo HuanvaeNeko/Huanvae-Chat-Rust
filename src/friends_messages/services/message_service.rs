@@ -24,17 +24,18 @@ impl MessageService {
 
     /// 验证双方是否为好友关系
     pub async fn verify_friendship(&self, user_id: &str, friend_id: &str) -> Result<bool, AuthError> {
-        let user_friends: String = sqlx::query_scalar(
-            r#"SELECT "user-owned-friends" FROM "users" WHERE "user-id" = $1"#,
+        // 查询 friendships 表验证好友关系
+        let result: Option<(uuid::Uuid,)> = sqlx::query_as(
+            r#"SELECT id FROM friendships 
+               WHERE user_id = $1 AND friend_id = $2 AND status = 'active'"#,
         )
         .bind(user_id)
-        .fetch_one(&self.db)
+        .bind(friend_id)
+        .fetch_optional(&self.db)
         .await
         .map_err(|_| AuthError::InternalServerError)?;
 
-        // 简单解析TEXT字段检查好友关系
-        Ok(user_friends.contains(&format!("friend-id:{}", friend_id))
-            && user_friends.contains("status:active"))
+        Ok(result.is_some())
     }
 
     /// 发送消息

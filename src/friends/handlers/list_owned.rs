@@ -1,8 +1,8 @@
 use axum::{extract::{State, Request}, Json};
 use crate::friends::models::{ListResponse, FriendDto};
-use crate::friends::services::parse_records;
 use crate::auth::{errors::AuthError, middleware::extract_auth_context};
 use sqlx::PgPool;
+use chrono::{DateTime, Utc};
 
 #[derive(Clone)]
 pub struct ListState { pub db: PgPool }
@@ -12,22 +12,27 @@ pub async fn list_owned_friends_handler(
     request: Request,
 ) -> Result<Json<ListResponse<FriendDto>>, AuthError> {
     let auth = extract_auth_context(&request)?;
-    let (friends_text,): (String,) = sqlx::query_as(
-        r#"SELECT "user-owned-friends" FROM "users" WHERE "user-id" = $1"#,
+    
+    // 查询好友关系表，关联用户表获取昵称
+    let friends: Vec<(String, Option<String>, DateTime<Utc>)> = sqlx::query_as(
+        r#"SELECT f.friend_id, u."user-nickname", f.add_time
+           FROM friendships f
+           LEFT JOIN users u ON u."user-id" = f.friend_id
+           WHERE f.user_id = $1 AND f.status = 'active'
+           ORDER BY f.add_time DESC"#,
     )
     .bind(&auth.user_id)
-    .fetch_one(&state.db)
+    .fetch_all(&state.db)
     .await
-    .map_err(|_| AuthError::InvalidToken)?;
+    .map_err(|_| AuthError::InternalServerError)?;
 
-    let items = parse_records(&friends_text)
+    let items = friends
         .into_iter()
-        .filter(|r| r.get("status").map(|s| s == "active").unwrap_or(false))
-        .map(|r| FriendDto {
-            friend_id: r.get("friend-id").cloned().unwrap_or_default(),
-            friend_nickname: r.get("friend-nickname").cloned(),
-            add_time: r.get("add-time").cloned().unwrap_or_default(),
-            approve_reason: r.get("approve-reason").cloned(),
+        .map(|(friend_id, nickname, add_time)| FriendDto {
+            friend_id,
+            friend_nickname: nickname,
+            add_time: add_time.to_rfc3339(),
+            approve_reason: None,
         })
         .collect();
 

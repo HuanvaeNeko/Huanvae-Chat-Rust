@@ -7,84 +7,165 @@
 ```
 src/friends/
   ├─ handlers/         // HTTP 请求处理器层
+  │   ├─ routes.rs     // 路由定义
+  │   ├─ create_request.rs
+  │   ├─ approve_request.rs
+  │   ├─ reject_request.rs
+  │   ├─ list_sent.rs
+  │   ├─ list_pending.rs
+  │   ├─ list_owned.rs
+  │   └─ remove_friend.rs
   ├─ models/           // 请求/响应数据模型
+  │   ├─ request.rs    // 请求体模型
+  │   └─ list.rs       // 列表响应模型
   ├─ services/         // 业务逻辑与数据读写
+  │   └─ friends_service.rs
   └─ mod.rs            // 模块导出
 ```
 
 ## 🔗 路由映射
 
-- `POST /api/friends/requests` → 提交好友申请
-- `POST /api/friends/requests/approve` → 同意好友申请
-- `POST /api/friends/requests/reject` → 拒绝好友申请
-- `GET  /api/friends/requests/sent` → 查看本人发出的待处理申请
-- `GET  /api/friends/requests/pending` → 查看本人收到的待处理申请
-- `GET  /api/friends` → 查看本人已拥有好友（仅返回 `status=active`）
-- `POST /api/friends/remove` → 删除好友（标记结束，不物理删除）
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/friends/requests` | 提交好友申请 |
+| POST | `/api/friends/requests/approve` | 同意好友申请 |
+| POST | `/api/friends/requests/reject` | 拒绝好友申请 |
+| GET | `/api/friends/requests/sent` | 查看本人发出的待处理申请 |
+| GET | `/api/friends/requests/pending` | 查看本人收到的待处理申请 |
+| GET | `/api/friends` | 查看本人已拥有好友 |
+| POST | `/api/friends/remove` | 删除好友 |
 
-所有上述路由均通过认证中间件，使用 `Extension<AuthContext>` 注入认证信息。
+所有路由均通过认证中间件保护，使用 `Extension<AuthContext>` 注入认证信息。
 
-注意：前端请求请勿在 `GET /api/friends` 末尾追加斜杠，否则会出现 404。
+## 🗄️ 数据库设计（独立关系表）
 
-## 🧩 数据存储约定（基于 users 表 TEXT 字段）
+### friendships 表（好友关系）
 
-- `users."user-sent-friend-requests"`：本用户发出的申请列表
-- `users."user-pending-friend-requests"`：本用户收到的待处理申请列表
-- `users."user-owned-friends"`：本用户已拥有的好友列表（含状态）
+存储双向好友关系，每对好友有两条记录（A→B 和 B→A）。
 
-记录采用“键值对逗号分隔；记录间分号分隔”的序列化协议，示例：
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | UUID | 主键 |
+| user_id | TEXT | 用户 ID |
+| friend_id | TEXT | 好友 ID |
+| status | TEXT | 状态: `active`（有效）、`ended`（已删除）|
+| remark | TEXT | 好友备注 |
+| add_time | TIMESTAMPTZ | 添加时间 |
+| end_time | TIMESTAMPTZ | 结束时间（删除时） |
+| end_reason | TEXT | 结束原因 |
 
-```
-request-id:12345,request-user-id:u1,request-time:2025-01-01T00:00:00Z,status:open;
-friend-id:u2,add-time:2025-01-02T12:00:00Z,approve-reason:同意备注;
-```
+**唯一约束**: `(user_id, friend_id)`
 
-标准键名：
+### friend_requests 表（好友请求）
 
-- 申请：`request-id`、`request-user-id`、`request-message`、`request-time`、`status`
-- 发出：`request-id`、`sent-to-user-id`、`sent-message`、`sent-time`、`status`
-- 好友：`friend-id`、`add-time`、`approve-reason`、`status`
+存储好友申请记录。
 
-`status` 取值：
-- 请求：`open | approved | rejected`
-- 好友：`active | ended`
-读取规则：好友列表仅返回 `status=active`；删除好友时将记录标记为 `status=ended`，并记录 `remove-time/remove-reason`。
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | UUID | 主键 |
+| from_user_id | TEXT | 申请人 |
+| to_user_id | TEXT | 被申请人 |
+| message | TEXT | 申请消息（**支持特殊字符**） |
+| status | TEXT | 状态: `pending`、`approved`、`rejected` |
+| reject_reason | TEXT | 拒绝原因 |
+| created-at | TIMESTAMPTZ | 创建时间 |
+| updated-at | TIMESTAMPTZ | 更新时间 |
+
+## ✅ 特殊字符支持
+
+新的数据库设计解决了旧版 TEXT 字段解析器的漏洞：
+
+- ✅ 分号 `;` - 安全
+- ✅ 冒号 `:` - 安全
+- ✅ 逗号 `,` - 安全
+- ✅ 任意 Unicode 字符 - 安全
+
+用户昵称和消息内容可以包含任意字符，不会导致数据损坏。
 
 ## 🔄 业务流程
 
-1. 提交申请
-   - 申请人向目标用户发起请求，记录写入申请人的 `sent` 与目标用户的 `pending`
-   - 若双方互相存在 `open` 申请，自动互相通过
-2. 同意申请
-   - 目标用户同意后，双方的 `sent/pending` 标记为 `approved`，并互相写入 `owned-friends`
-3. 拒绝申请
-   - 标记双方相关记录为 `rejected`，可选记录拒绝原因
-4. 列表查询
-   - 仅返回 `status=open` 的 `sent/pending`
-   - `owned` 仅返回 `status=active` 的好友条目
+### 1. 提交申请
 
-## 🗑️ 删除好友
+- 申请人向目标用户发起请求
+- 在 `friend_requests` 表插入一条 `pending` 记录
+- **自动互通过**: 若对方已有待处理的申请，自动双向同意并建立好友关系
 
-- 路径：`POST /api/friends/remove`
-- 请求示例：
+### 2. 同意申请
+
+- 更新 `friend_requests` 状态为 `approved`
+- 在 `friendships` 表插入双向记录
+
+### 3. 拒绝申请
+
+- 更新 `friend_requests` 状态为 `rejected`
+- 可选记录拒绝原因
+
+### 4. 删除好友
+
+- 更新双方 `friendships` 记录状态为 `ended`
+- 记录删除时间和原因
+- 软删除，保留历史记录
+
+## 📝 API 示例
+
+### 提交好友请求
+
+```bash
+curl -X POST http://localhost:8080/api/friends/requests \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{
+    "user_id": "user_a",
+    "target_user_id": "user_b",
+    "reason": "你好;这是:测试,消息!",
+    "request_time": "2025-12-02T10:00:00Z"
+  }'
 ```
+
+### 同意好友请求
+
+```bash
+curl -X POST http://localhost:8080/api/friends/requests/approve \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <token>" \
+  -d '{
+    "user_id": "user_b",
+    "applicant_user_id": "user_a",
+    "approved_time": "2025-12-02T10:01:00Z"
+  }'
+```
+
+### 查看好友列表
+
+```bash
+curl -X GET http://localhost:8080/api/friends \
+  -H "Authorization: Bearer <token>"
+```
+
+响应示例：
+```json
 {
-  "user_id": "user-123",
-  "friend_user_id": "user-456",
-  "remove_time": "2025-11-19T03:00:00Z",
-  "remove_reason": "不常联系"
+  "items": [
+    {
+      "friend_id": "user_b",
+      "friend_nickname": "用户B:特殊;字符",
+      "add_time": "2025-12-02T11:05:01.202820+00:00",
+      "approve_reason": null
+    }
+  ]
 }
 ```
-- 认证：需 `Authorization: Bearer <token>`；处理器校验 `user_id` 与认证上下文一致
-- 行为：双向将 `user-owned-friends` 中匹配记录 `status=ended`，写入 `remove-time/remove-reason`
-- 幂等：重复调用不会产生额外副作用
 
 ## 🏗️ 设计原则
 
-- 职责清晰：Handlers 仅负责 HTTP 交互；Services 负责业务与存储；Models 负责数据结构
-- 认证一致：沿用 `src/auth` 的已实现功能与中间件
-- 风格一致：模块划分与 README 风格与 `src/auth` 保持一致
+- **独立表结构**: 使用标准化的关系表替代 TEXT 字段存储
+- **安全性**: 消除特殊字符解析漏洞
+- **性能**: 支持索引查询，无需全表解析
+- **认证一致**: 复用 `src/auth` 的认证中间件
+- **软删除**: 保留历史记录，支持数据审计
 
 ## 🔧 初始化与挂载
 
 在 `src/main.rs` 中通过 `create_friend_routes(...)` 挂载至 `/api/friends`，并应用认证中间件。
+
+数据库表在 `PostgreSQL/init/07_friendships_tables.sql` 中定义。

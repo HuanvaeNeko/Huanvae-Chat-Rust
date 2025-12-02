@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
 /// 用户模型（对应数据库 users 表）
+/// 好友关系已移至独立表: friendships, friend_requests
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct User {
     #[serde(rename = "user-id")]
@@ -24,18 +25,6 @@ pub struct User {
     #[sqlx(rename = "admin")]
     pub admin: String,
 
-    #[serde(rename = "user-owned-friends")]
-    #[sqlx(rename = "user-owned-friends")]
-    pub user_owned_friends: String,
-
-    #[serde(rename = "user-pending-friend-requests")]
-    #[sqlx(rename = "user-pending-friend-requests")]
-    pub user_pending_friend_requests: String,
-
-    #[serde(rename = "user-sent-friend-requests")]
-    #[sqlx(rename = "user-sent-friend-requests")]
-    pub user_sent_friend_requests: String,
-
     #[serde(rename = "user-joined-group-chats")]
     #[sqlx(rename = "user-joined-group-chats")]
     pub user_joined_group_chats: String,
@@ -43,14 +32,6 @@ pub struct User {
     #[serde(rename = "user-ai-conversation-data")]
     #[sqlx(rename = "user-ai-conversation-data")]
     pub user_ai_conversation_data: String,
-
-    #[serde(rename = "user-chat-data-with-friends")]
-    #[sqlx(rename = "user-chat-data-with-friends")]
-    pub user_chat_data_with_friends: String,
-
-    #[serde(rename = "user-file-data-and-url")]
-    #[sqlx(rename = "user-file-data-and-url")]
-    pub user_file_data_and_url: String,
 
     #[serde(rename = "need-blacklist-check")]
     #[sqlx(rename = "need-blacklist-check")]

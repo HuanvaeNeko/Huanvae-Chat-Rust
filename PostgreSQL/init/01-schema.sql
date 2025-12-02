@@ -17,29 +17,13 @@ CREATE TABLE IF NOT EXISTS "users" (
     "user-avatar-url" TEXT DEFAULT '',
     "admin" TEXT DEFAULT 'false',
     
-    -- 好友关系字段
-    -- 存储格式: friend-nickname:张三,friend-remark:老同学,friend-id:user-123,add-time:2025-01-15;...
-    "user-owned-friends" TEXT DEFAULT '',
+    -- 好友关系已移至独立表: friendships, friend_requests (见 07_friendships_tables.sql)
     
-    -- 存储格式: request-user-id:user-456,request-message:你好,request-time:2025-01-15;...
-    "user-pending-friend-requests" TEXT DEFAULT '',
-    
-    -- 存储格式: sent-to-user-id:user-789,sent-message:加个好友,sent-time:2025-01-15;...
-    "user-sent-friend-requests" TEXT DEFAULT '',
-    
-    -- 群聊和对话字段
-    -- 存储格式: join-time:2025-01-10,group-name:测试群,group-id:group-001,group-remark:工作群;...
+    -- 群聊字段 (待迁移到独立表)
     "user-joined-group-chats" TEXT DEFAULT '',
     
-    -- 存储格式: conversation-id:conv-001,conversation-title:AI助手,create-time:2025-01-15,last-message-time:2025-01-16;...
+    -- AI对话数据 (待迁移到 JSONB)
     "user-ai-conversation-data" TEXT DEFAULT '',
-    
-    -- 存储格式: message-sender-id:user-123,message-content:你好,send-date:2025-01-15,message-type:text;...
-    "user-chat-data-with-friends" TEXT DEFAULT '',
-    
-    -- 文件字段
-    -- 存储格式: file-name:doc.pdf,file-type:pdf,file-size:1024,upload-time:2025-01-15,file-path-url:minio://bucket/file.pdf;...
-    "user-file-data-and-url" TEXT DEFAULT '',
     
     -- 黑名单检查控制字段（智能性能优化）
     "need-blacklist-check" BOOLEAN DEFAULT false,
