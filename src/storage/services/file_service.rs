@@ -5,6 +5,7 @@ use sqlx::Row;
 use std::sync::Arc;
 use tracing::info;
 
+use crate::config::storage_config;
 use crate::storage::client::S3Client;
 use crate::storage::models::*;
 use crate::storage::services::{DeduplicationService, FileValidator, UuidMappingService};
@@ -466,14 +467,15 @@ impl FileService {
             .map_err(|e: String| anyhow::anyhow!(e))?;
         let bucket = self.get_bucket_name(&storage_loc);
         
+        let multipart_ttl = storage_config().multipart_url_ttl;
         let part_url = self.s3_client
-            .generate_presigned_upload_part_url(bucket, file_key, upload_id, part_number, 3600)
+            .generate_presigned_upload_part_url(bucket, file_key, upload_id, part_number, multipart_ttl)
             .await?;
 
         Ok(MultipartPartResponse {
             part_url,
             part_number,
-            expires_in: 3600,
+            expires_in: multipart_ttl,
         })
     }
 
