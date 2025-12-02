@@ -113,6 +113,22 @@ impl BlacklistService {
         Ok(result.rows_affected())
     }
 
+    /// 清理过期的 Access Token 缓存（定时任务调用）
+    /// 删除 exp < now() 的记录
+    pub async fn cleanup_expired_access_cache(&self) -> Result<u64, AuthError> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM "user-access-cache"
+            WHERE "exp" < $1
+            "#,
+        )
+        .bind(Utc::now().naive_utc())
+        .execute(&self.db)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
     /// 批量拉黑用户所有 Access Token（密码修改时调用）
     /// 从 user-access-cache 读取所有未过期的 Token 并加入黑名单
     pub async fn blacklist_all_user_access_tokens(

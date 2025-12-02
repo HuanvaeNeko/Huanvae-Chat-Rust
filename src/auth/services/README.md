@@ -502,7 +502,7 @@ if need_check {
 ---
 
 #### 4️⃣ **cleanup_expired_tokens** - 清理过期Token
-**调用时机**: 定时任务（建议每小时）
+**调用时机**: 定时任务（默认每小时，可通过 `TOKEN_CLEANUP_INTERVAL_SECONDS` 环境变量配置）
 
 ```rust
 // 例如在定时任务中
@@ -515,7 +515,7 @@ tracing::info!("清理了 {} 个过期的黑名单Token", deleted);
 ---
 
 #### 5️⃣ **cleanup_expired_checks** - 清理过期检查标志
-**调用时机**: 定时任务（建议每分钟）
+**调用时机**: 定时任务（默认每分钟，可通过 `CHECK_CLEANUP_INTERVAL_SECONDS` 环境变量配置）
 
 ```rust
 // 例如在定时任务中
@@ -524,6 +524,53 @@ tracing::info!("恢复了 {} 个用户的高性能模式", updated);
 ```
 
 **作用**: 自动将过期的检查标志恢复为 false
+
+---
+
+#### 6️⃣ **cleanup_expired_access_cache** - 清理过期的 Access Token 缓存
+**调用时机**: 定时任务（默认每5分钟，可通过 `CACHE_CLEANUP_INTERVAL_SECONDS` 环境变量配置）
+
+```rust
+// 例如在定时任务中
+let deleted = blacklist_service.cleanup_expired_access_cache().await?;
+tracing::info!("清理了 {} 条过期的 user-access-cache 记录", deleted);
+```
+
+**查询**:
+```sql
+DELETE FROM "user-access-cache"
+WHERE "exp" < $1
+```
+
+**作用**: 清理 `user-access-cache` 表中已过期的记录，减少数据库体积
+
+---
+
+### 🕐 定时清理任务
+
+系统启动时会自动启动后台定时清理任务，清理间隔可通过环境变量配置：
+
+| 清理任务 | 环境变量 | 默认值 | 说明 |
+|---------|---------|-------|------|
+| `token-blacklist` | `TOKEN_CLEANUP_INTERVAL_SECONDS` | 3600 (1小时) | 清理过期的黑名单记录 |
+| `user-access-cache` | `CACHE_CLEANUP_INTERVAL_SECONDS` | 300 (5分钟) | 清理过期的 Token 缓存 |
+| `need-blacklist-check` | `CHECK_CLEANUP_INTERVAL_SECONDS` | 60 (1分钟) | 重置过期的黑名单检查标志 |
+
+**示例配置** (`.env` 文件):
+```env
+# 定时清理任务间隔配置
+TOKEN_CLEANUP_INTERVAL_SECONDS=3600    # token-blacklist 清理间隔（秒）
+CACHE_CLEANUP_INTERVAL_SECONDS=300     # user-access-cache 清理间隔（秒）
+CHECK_CLEANUP_INTERVAL_SECONDS=60      # need-blacklist-check 清理间隔（秒）
+```
+
+**启动日志示例**:
+```
+🧹 定时清理任务已启动:
+   - token-blacklist 清理间隔: 3600秒
+   - user-access-cache 清理间隔: 300秒
+   - need-blacklist-check 清理间隔: 60秒
+```
 
 ---
 

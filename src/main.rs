@@ -175,7 +175,76 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app_state = AppState::new(db.clone(), key_manager, s3_client.clone(), api_base_url.clone());
     tracing::info!("✅ 应用状态初始化成功");
 
-    // 6. 创建路由（使用 AppState 生成各模块所需的 State）
+    // 6. 启动后台定时清理任务
+    {
+        let blacklist_service = app_state.blacklist_service.clone();
+        tokio::spawn(async move {
+            // 清理间隔配置（秒）
+            let token_cleanup_interval = std::env::var("TOKEN_CLEANUP_INTERVAL_SECONDS")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(3600); // 默认每小时
+            
+            let cache_cleanup_interval = std::env::var("CACHE_CLEANUP_INTERVAL_SECONDS")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(300); // 默认每5分钟
+            
+            let check_cleanup_interval = std::env::var("CHECK_CLEANUP_INTERVAL_SECONDS")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(60); // 默认每分钟
+
+            tracing::info!("🧹 定时清理任务已启动:");
+            tracing::info!("   - token-blacklist 清理间隔: {}秒", token_cleanup_interval);
+            tracing::info!("   - user-access-cache 清理间隔: {}秒", cache_cleanup_interval);
+            tracing::info!("   - need-blacklist-check 清理间隔: {}秒", check_cleanup_interval);
+
+            let mut token_interval = tokio::time::interval(Duration::from_secs(token_cleanup_interval));
+            let mut cache_interval = tokio::time::interval(Duration::from_secs(cache_cleanup_interval));
+            let mut check_interval = tokio::time::interval(Duration::from_secs(check_cleanup_interval));
+
+            loop {
+                tokio::select! {
+                    _ = token_interval.tick() => {
+                        match blacklist_service.cleanup_expired_tokens().await {
+                            Ok(count) if count > 0 => {
+                                tracing::info!("🧹 已清理 {} 条过期的 token-blacklist 记录", count);
+                            }
+                            Err(e) => {
+                                tracing::warn!("清理 token-blacklist 失败: {}", e);
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ = cache_interval.tick() => {
+                        match blacklist_service.cleanup_expired_access_cache().await {
+                            Ok(count) if count > 0 => {
+                                tracing::info!("🧹 已清理 {} 条过期的 user-access-cache 记录", count);
+                            }
+                            Err(e) => {
+                                tracing::warn!("清理 user-access-cache 失败: {}", e);
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ = check_interval.tick() => {
+                        match blacklist_service.cleanup_expired_checks().await {
+                            Ok(count) if count > 0 => {
+                                tracing::info!("🧹 已重置 {} 个用户的 need-blacklist-check 标志", count);
+                            }
+                            Err(e) => {
+                                tracing::warn!("清理 need-blacklist-check 失败: {}", e);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // 7. 创建路由（使用 AppState 生成各模块所需的 State）
     let app = Router::new()
         // 健康检查
         .route("/health", get(|| async { "OK" }))
