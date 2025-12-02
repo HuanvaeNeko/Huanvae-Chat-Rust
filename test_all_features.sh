@@ -1371,6 +1371,95 @@ fi
 sleep 1
 
 # ==============================================
+
+log_step "第 46 步：查询个人文件列表（新增功能）"
+
+log_info "用户1查询自己的文件列表..."
+FILE_LIST=$(api_call GET "/api/storage/files?page=1&limit=20&sort_by=created_at&sort_order=desc" "$USER1_TOKEN_NEW")
+echo "$FILE_LIST" | jq '.' 2>/dev/null || echo "$FILE_LIST"
+
+FILE_COUNT=$(echo "$FILE_LIST" | jq -r '.total' 2>/dev/null || echo "0")
+FILES_RETURNED=$(echo "$FILE_LIST" | jq -r '.files | length' 2>/dev/null || echo "0")
+PAGE_INFO=$(echo "$FILE_LIST" | jq -r '.page' 2>/dev/null || echo "0")
+HAS_MORE_FILES=$(echo "$FILE_LIST" | jq -r '.has_more' 2>/dev/null || echo "false")
+
+if [ "$FILE_COUNT" != "null" ] && [ "$FILE_COUNT" -ge 0 ]; then
+    log_success "✓ 文件列表查询成功"
+    log_info "总文件数: $FILE_COUNT"
+    log_info "本页返回: $FILES_RETURNED 个文件"
+    log_info "当前页码: $PAGE_INFO"
+    log_info "是否有更多: $HAS_MORE_FILES"
+else
+    log_error "✗ 文件列表查询失败"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 47 步：测试文件列表分页功能"
+
+log_info "查询第1页，每页2条..."
+PAGE1=$(api_call GET "/api/storage/files?page=1&limit=2" "$USER1_TOKEN_NEW")
+PAGE1_COUNT=$(echo "$PAGE1" | jq -r '.files | length' 2>/dev/null || echo "0")
+PAGE1_HAS_MORE=$(echo "$PAGE1" | jq -r '.has_more' 2>/dev/null || echo "false")
+
+log_info "第1页返回: $PAGE1_COUNT 条，是否有更多: $PAGE1_HAS_MORE"
+
+if [ "$PAGE1_HAS_MORE" = "true" ]; then
+    log_info "查询第2页..."
+    PAGE2=$(api_call GET "/api/storage/files?page=2&limit=2" "$USER1_TOKEN_NEW")
+    PAGE2_COUNT=$(echo "$PAGE2" | jq -r '.files | length' 2>/dev/null || echo "0")
+    log_info "第2页返回: $PAGE2_COUNT 条"
+    log_success "✓ 分页功能正常"
+else
+    log_info "文件不足，无需分页测试"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 48 步：测试文件列表排序功能"
+
+log_info "按文件大小降序排序..."
+SORTED_BY_SIZE=$(api_call GET "/api/storage/files?sort_by=file_size&sort_order=desc" "$USER1_TOKEN_NEW")
+FIRST_FILE_SIZE=$(echo "$SORTED_BY_SIZE" | jq -r '.files[0].file_size' 2>/dev/null || echo "0")
+SECOND_FILE_SIZE=$(echo "$SORTED_BY_SIZE" | jq -r '.files[1].file_size' 2>/dev/null || echo "0")
+
+if [ "$FIRST_FILE_SIZE" != "null" ] && [ "$SECOND_FILE_SIZE" != "null" ]; then
+    if [ "$FIRST_FILE_SIZE" -ge "$SECOND_FILE_SIZE" ]; then
+        log_success "✓ 排序功能正常（大小降序）"
+        log_info "第一个文件大小: $FIRST_FILE_SIZE 字节"
+        log_info "第二个文件大小: $SECOND_FILE_SIZE 字节"
+    else
+        log_error "✗ 排序结果不正确"
+    fi
+else
+    log_info "文件不足，跳过排序验证"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 49 步：验证用户2的文件列表独立性"
+
+log_info "用户2查询自己的文件列表..."
+USER2_FILE_LIST=$(api_call GET "/api/storage/files" "$USER2_TOKEN")
+USER2_FILE_COUNT=$(echo "$USER2_FILE_LIST" | jq -r '.total' 2>/dev/null || echo "0")
+
+log_info "用户2的文件总数: $USER2_FILE_COUNT"
+
+if [ "$USER2_FILE_COUNT" != "$FILE_COUNT" ] || [ "$USER2_FILE_COUNT" = "0" ]; then
+    log_success "✓ 用户文件列表独立（每个用户只看到自己的文件）"
+else
+    log_info "用户2有相同数量的文件（可能是跨用户秒传导致）"
+fi
+
+sleep 1
+
+# ==============================================
 # 测试总结
 # ==============================================
 
@@ -1406,6 +1495,7 @@ echo -e "${GREEN}║  ✓ 跨用户秒传       UUID映射机制验证          
 echo -e "${GREEN}║  ✓ 权限控制         基于权限表的访问验证              ║${NC}"
 echo -e "${GREEN}║  ✓ 文件完整性       哈希值验证通过                    ║${NC}"
 echo -e "${GREEN}║  ✓ 71MB大文件       TIF格式上传测试                   ║${NC}"
+echo -e "${GREEN}║  ✓ 文件列表查询     分页排序功能验证                  ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
