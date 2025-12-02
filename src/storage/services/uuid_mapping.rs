@@ -26,10 +26,10 @@ impl UuidMappingService {
     /// 通过哈希查找已存在的UUID映射
     pub async fn find_by_hash(&self, file_hash: &str) -> Result<Option<UuidMappingInfo>> {
         let result = sqlx::query_as::<_, UuidMappingRow>(
-            "SELECT uuid, physical_file_key, file_hash, file_size, content_type, preview_support
-             FROM file_uuid_mapping
-             WHERE file_hash = $1
-             LIMIT 1"
+            r#"SELECT "uuid", "physical-file-key", "file-hash", "file-size", "content-type", "preview-support"
+             FROM "file-uuid-mapping"
+             WHERE "file-hash" = $1
+             LIMIT 1"#
         )
         .bind(file_hash)
         .fetch_optional(&self.db)
@@ -58,9 +58,9 @@ impl UuidMappingService {
         let uuid = Uuid::new_v4().to_string();
 
         sqlx::query(
-            "INSERT INTO file_uuid_mapping 
-             (uuid, physical_file_key, file_hash, file_size, content_type, preview_support, first_uploader_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)"
+            r#"INSERT INTO "file-uuid-mapping" 
+             ("uuid", "physical-file-key", "file-hash", "file-size", "content-type", "preview-support", "first-uploader-id")
+             VALUES ($1, $2, $3, $4, $5, $6, $7)"#
         )
         .bind(&uuid)
         .bind(physical_file_key)
@@ -78,9 +78,9 @@ impl UuidMappingService {
     /// 通过UUID获取映射信息
     pub async fn get_by_uuid(&self, uuid: &str) -> Result<Option<UuidMappingInfo>> {
         let result = sqlx::query_as::<_, UuidMappingRow>(
-            "SELECT uuid, physical_file_key, file_hash, file_size, content_type, preview_support
-             FROM file_uuid_mapping
-             WHERE uuid = $1"
+            r#"SELECT "uuid", "physical-file-key", "file-hash", "file-size", "content-type", "preview-support"
+             FROM "file-uuid-mapping"
+             WHERE "uuid" = $1"#
         )
         .bind(uuid)
         .fetch_optional(&self.db)
@@ -105,9 +105,9 @@ impl UuidMappingService {
         granted_by: &str,
     ) -> Result<()> {
         sqlx::query(
-            "INSERT INTO file_access_permissions 
-             (file_uuid, user_id, access_type, granted_by)
-             VALUES ($1, $2, $3, $4)"
+            r#"INSERT INTO "file-access-permissions" 
+             ("file-uuid", "user-id", "access-type", "granted-by")
+             VALUES ($1, $2, $3, $4)"#
         )
         .bind(file_uuid)
         .bind(user_id)
@@ -122,8 +122,8 @@ impl UuidMappingService {
     /// 检查用户是否有访问权限
     pub async fn check_permission(&self, file_uuid: &str, user_id: &str) -> Result<bool> {
         let result = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM file_access_permissions
-             WHERE file_uuid = $1 AND user_id = $2 AND revoked_at IS NULL"
+            r#"SELECT COUNT(*) FROM "file-access-permissions"
+             WHERE "file-uuid" = $1 AND "user-id" = $2 AND "revoked-at" IS NULL"#
         )
         .bind(file_uuid)
         .bind(user_id)
@@ -136,9 +136,9 @@ impl UuidMappingService {
     /// 撤销用户访问权限（软删除）
     pub async fn revoke_permission(&self, file_uuid: &str, user_id: &str) -> Result<()> {
         sqlx::query(
-            "UPDATE file_access_permissions 
-             SET revoked_at = NOW()
-             WHERE file_uuid = $1 AND user_id = $2 AND revoked_at IS NULL"
+            r#"UPDATE "file-access-permissions" 
+             SET "revoked-at" = NOW()
+             WHERE "file-uuid" = $1 AND "user-id" = $2 AND "revoked-at" IS NULL"#
         )
         .bind(file_uuid)
         .bind(user_id)
@@ -152,10 +152,14 @@ impl UuidMappingService {
 #[derive(sqlx::FromRow)]
 struct UuidMappingRow {
     uuid: String,
+    #[sqlx(rename = "physical-file-key")]
     physical_file_key: String,
+    #[sqlx(rename = "file-hash")]
     file_hash: String,
+    #[sqlx(rename = "file-size")]
     file_size: i64,
+    #[sqlx(rename = "content-type")]
     content_type: String,
+    #[sqlx(rename = "preview-support")]
     preview_support: String,
 }
-

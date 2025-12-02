@@ -1,14 +1,14 @@
 use crate::auth::{
-    errors::AuthError,
     models::{AccessTokenClaims, CreateRefreshToken, RefreshTokenClaims, TokenResponse},
     utils::{generate_device_id, generate_jti, KeyManager},
 };
+use crate::common::AppError;
 use crate::config::token_config;
 use chrono::{Duration, Utc};
-use tokio::time::sleep;
-use std::time::Duration as StdDuration;
-use jsonwebtoken::{encode, decode, Header, Validation, Algorithm};
+use jsonwebtoken::{decode, encode, Algorithm, Header, Validation};
 use sqlx::PgPool;
+use std::time::Duration as StdDuration;
+use tokio::time::sleep;
 
 /// Token 服务（生成、验证、刷新）
 pub struct TokenService {
@@ -30,7 +30,7 @@ impl TokenService {
         device_info: Option<String>,
         mac_address: Option<String>,
         ip_address: Option<String>,
-    ) -> Result<TokenResponse, AuthError> {
+    ) -> Result<TokenResponse, AppError> {
         let device_id = generate_device_id();
         let token_id = uuid::Uuid::new_v4().to_string();
         let now = Utc::now();
@@ -76,7 +76,7 @@ impl TokenService {
         device_id: &str,
         device_info: &str,
         mac_address: &str,
-    ) -> Result<String, AuthError> {
+    ) -> Result<String, AppError> {
         let now = Utc::now();
         let config = token_config();
         let expires_at = now + Duration::seconds(config.access_token_ttl as i64);
@@ -103,7 +103,7 @@ impl TokenService {
         Ok(token)
     }
 
-    pub async fn write_access_cache(&self, claims: &AccessTokenClaims) -> Result<(), AuthError> {
+    pub async fn write_access_cache(&self, claims: &AccessTokenClaims) -> Result<(), AppError> {
         for attempt in 0..2 {
             let res = sqlx::query(
                 r#"
@@ -127,7 +127,7 @@ impl TokenService {
                         sleep(StdDuration::from_millis(100)).await;
                         continue;
                     }
-                    return Err(AuthError::DatabaseError(e.to_string()));
+                    return Err(AppError::Database(e.to_string()));
                 }
             }
         }
@@ -140,7 +140,7 @@ impl TokenService {
         user_id: &str,
         device_id: &str,
         token_id: &str,
-    ) -> Result<String, AuthError> {
+    ) -> Result<String, AppError> {
         let now = Utc::now();
         let config = token_config();
         let expires_at = now + Duration::seconds(config.refresh_token_ttl as i64);
@@ -163,7 +163,7 @@ impl TokenService {
     }
 
     /// 验证并解析 Access Token
-    pub fn verify_access_token(&self, token: &str) -> Result<AccessTokenClaims, AuthError> {
+    pub fn verify_access_token(&self, token: &str) -> Result<AccessTokenClaims, AppError> {
         let mut validation = Validation::new(Algorithm::RS256);
         validation.validate_exp = true;
 
@@ -177,7 +177,7 @@ impl TokenService {
     }
 
     /// 验证并解析 Refresh Token
-    pub fn verify_refresh_token(&self, token: &str) -> Result<RefreshTokenClaims, AuthError> {
+    pub fn verify_refresh_token(&self, token: &str) -> Result<RefreshTokenClaims, AppError> {
         let mut validation = Validation::new(Algorithm::RS256);
         validation.validate_exp = true;
 
@@ -194,7 +194,7 @@ impl TokenService {
     pub async fn refresh_access_token(
         &self,
         refresh_token: &str,
-    ) -> Result<String, AuthError> {
+    ) -> Result<String, AppError> {
         // 验证 Refresh Token
         let claims = self.verify_refresh_token(refresh_token)?;
 
@@ -209,11 +209,11 @@ impl TokenService {
         .fetch_optional(&self.db)
         .await?;
 
-        let db_token = db_token.ok_or(AuthError::InvalidRefreshToken)?;
+        let db_token = db_token.ok_or(AppError::InvalidToken)?;
 
         // 检查是否过期
         if db_token.expires_at < Utc::now().naive_utc() {
-            return Err(AuthError::TokenExpired);
+            return Err(AppError::InvalidToken);
         }
 
         // 更新最后使用时间
@@ -249,7 +249,7 @@ impl TokenService {
     }
 
     /// 保存 Refresh Token 到数据库
-    async fn save_refresh_token(&self, token: &CreateRefreshToken) -> Result<(), AuthError> {
+    async fn save_refresh_token(&self, token: &CreateRefreshToken) -> Result<(), AppError> {
         sqlx::query(
             r#"
             INSERT INTO "user-refresh-tokens" (
@@ -277,7 +277,7 @@ impl TokenService {
         &self,
         token_id: &str,
         reason: Option<String>,
-    ) -> Result<(), AuthError> {
+    ) -> Result<(), AppError> {
         sqlx::query(
             r#"
             UPDATE "user-refresh-tokens"
@@ -295,7 +295,7 @@ impl TokenService {
     }
 
     /// 撤销用户所有设备的 Refresh Token（修改密码时调用）
-    pub async fn revoke_all_user_tokens(&self, user_id: &str) -> Result<(), AuthError> {
+    pub async fn revoke_all_user_tokens(&self, user_id: &str) -> Result<(), AppError> {
         sqlx::query(
             r#"
             UPDATE "user-refresh-tokens"

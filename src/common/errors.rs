@@ -10,16 +10,18 @@ use axum::{
 use thiserror::Error;
 
 use super::ApiResponse;
-use crate::auth::errors::AuthError;
 
 /// 应用统一错误类型
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum AppError {
     // ========================================
     // 认证相关错误 (401)
     // ========================================
     #[error("未授权访问")]
     Unauthorized,
+
+    #[error("用户名或密码错误")]
+    InvalidCredentials,
 
     #[error("Token 无效或已过期")]
     InvalidToken,
@@ -72,9 +74,10 @@ impl AppError {
     pub fn status_code(&self) -> StatusCode {
         match self {
             // 401 Unauthorized
-            AppError::Unauthorized | AppError::InvalidToken | AppError::TokenRevoked => {
-                StatusCode::UNAUTHORIZED
-            }
+            AppError::Unauthorized
+            | AppError::InvalidCredentials
+            | AppError::InvalidToken
+            | AppError::TokenRevoked => StatusCode::UNAUTHORIZED,
 
             // 403 Forbidden
             AppError::Forbidden => StatusCode::FORBIDDEN,
@@ -133,30 +136,6 @@ impl IntoResponse for AppError {
 // 从其他错误类型转换
 // ========================================
 
-/// 从 AuthError 转换
-impl From<AuthError> for AppError {
-    fn from(err: AuthError) -> Self {
-        match err {
-            AuthError::InvalidCredentials => AppError::Unauthorized,
-            AuthError::InvalidToken => AppError::InvalidToken,
-            AuthError::TokenExpired => AppError::InvalidToken,
-            AuthError::TokenRevoked => AppError::TokenRevoked,
-            AuthError::InvalidRefreshToken => AppError::InvalidToken,
-            AuthError::UserAlreadyExists => AppError::Conflict("用户已存在".to_string()),
-            AuthError::UserNotFound => AppError::NotFound("用户".to_string()),
-            AuthError::DeviceNotFound => AppError::NotFound("设备".to_string()),
-            AuthError::InvalidPassword => AppError::BadRequest("密码格式不符合要求".to_string()),
-            AuthError::InvalidEmail => AppError::BadRequest("邮箱格式不正确".to_string()),
-            AuthError::DatabaseError(msg) => AppError::Database(msg),
-            AuthError::CryptoError(_) => AppError::Internal,
-            AuthError::InternalServerError => AppError::Internal,
-            AuthError::Unauthorized => AppError::Unauthorized,
-            AuthError::Forbidden => AppError::Forbidden,
-            AuthError::BadRequest(msg) => AppError::BadRequest(msg),
-        }
-    }
-}
-
 /// 从 sqlx::Error 转换
 impl From<sqlx::Error> for AppError {
     fn from(err: sqlx::Error) -> Self {
@@ -164,42 +143,34 @@ impl From<sqlx::Error> for AppError {
     }
 }
 
+/// 从 bcrypt::BcryptError 转换
+impl From<bcrypt::BcryptError> for AppError {
+    fn from(err: bcrypt::BcryptError) -> Self {
+        tracing::error!("加密错误: {}", err);
+        AppError::Internal
+    }
+}
+
+/// 从 jsonwebtoken 错误转换
+impl From<jsonwebtoken::errors::Error> for AppError {
+    fn from(err: jsonwebtoken::errors::Error) -> Self {
+        use jsonwebtoken::errors::ErrorKind;
+        match err.kind() {
+            ErrorKind::ExpiredSignature => AppError::InvalidToken,
+            ErrorKind::InvalidToken => AppError::InvalidToken,
+            _ => AppError::InvalidToken,
+        }
+    }
+}
+
 /// 从 anyhow::Error 转换
 impl From<anyhow::Error> for AppError {
-    fn from(err: anyhow::Error) -> Self {
-        // 尝试向下转换为已知错误类型
-        if let Some(auth_err) = err.downcast_ref::<AuthError>() {
-            return AppError::from(auth_err.clone());
-        }
-
+    fn from(_err: anyhow::Error) -> Self {
         // 默认作为内部错误处理
         AppError::Internal
     }
 }
 
-/// 为了支持 anyhow 的 downcast，AuthError 需要实现 Clone
-impl Clone for AuthError {
-    fn clone(&self) -> Self {
-        match self {
-            AuthError::InvalidCredentials => AuthError::InvalidCredentials,
-            AuthError::InvalidToken => AuthError::InvalidToken,
-            AuthError::TokenExpired => AuthError::TokenExpired,
-            AuthError::TokenRevoked => AuthError::TokenRevoked,
-            AuthError::InvalidRefreshToken => AuthError::InvalidRefreshToken,
-            AuthError::UserAlreadyExists => AuthError::UserAlreadyExists,
-            AuthError::UserNotFound => AuthError::UserNotFound,
-            AuthError::DeviceNotFound => AuthError::DeviceNotFound,
-            AuthError::InvalidPassword => AuthError::InvalidPassword,
-            AuthError::InvalidEmail => AuthError::InvalidEmail,
-            AuthError::DatabaseError(msg) => AuthError::DatabaseError(msg.clone()),
-            AuthError::CryptoError(msg) => AuthError::CryptoError(msg.clone()),
-            AuthError::InternalServerError => AuthError::InternalServerError,
-            AuthError::Unauthorized => AuthError::Unauthorized,
-            AuthError::Forbidden => AuthError::Forbidden,
-            AuthError::BadRequest(msg) => AuthError::BadRequest(msg.clone()),
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -207,7 +178,14 @@ mod tests {
 
     #[test]
     fn test_status_codes() {
-        assert_eq!(AppError::Unauthorized.status_code(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            AppError::Unauthorized.status_code(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            AppError::InvalidCredentials.status_code(),
+            StatusCode::UNAUTHORIZED
+        );
         assert_eq!(AppError::Forbidden.status_code(), StatusCode::FORBIDDEN);
         assert_eq!(
             AppError::NotFound("用户".to_string()).status_code(),
@@ -217,7 +195,10 @@ mod tests {
             AppError::BadRequest("错误".to_string()).status_code(),
             StatusCode::BAD_REQUEST
         );
-        assert_eq!(AppError::Internal.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            AppError::Internal.status_code(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 
     #[test]

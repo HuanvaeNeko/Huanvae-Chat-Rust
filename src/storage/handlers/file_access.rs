@@ -10,7 +10,7 @@ use crate::auth::middleware::AuthContext;
 use crate::storage::handlers::upload::StorageState;
 use crate::storage::models::{PresignedUrlRequest, PresignedUrlResponse};
 
-/// POST /api/storage/file/{uuid}/presigned-url
+/// POST /api/storage/file/{uuid}/presigned_url
 /// 生成普通文件的预签名URL（3小时有效）
 pub async fn generate_presigned_url(
     State(state): State<StorageState>,
@@ -47,7 +47,7 @@ pub async fn generate_presigned_url(
     }
 }
 
-/// POST /api/storage/file/{uuid}/presigned-url/extended
+/// POST /api/storage/file/{uuid}/presigned_url/extended
 /// 生成超大文件的预签名URL（自定义有效时间）
 pub async fn generate_extended_presigned_url(
     State(state): State<StorageState>,

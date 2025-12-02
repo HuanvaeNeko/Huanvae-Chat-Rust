@@ -1,9 +1,12 @@
 use crate::auth::{
-    errors::AuthError,
     middleware::AuthContext,
     services::{BlacklistService, TokenService},
 };
-use axum::{extract::{Request, State}, Json};
+use crate::common::AppError;
+use axum::{
+    extract::{Request, State},
+    Json,
+};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -18,13 +21,13 @@ pub struct LogoutState {
 pub async fn logout_handler(
     State(state): State<LogoutState>,
     request: Request,
-) -> Result<Json<Value>, AuthError> {
+) -> Result<Json<Value>, AppError> {
     // 1. 从请求中提取认证上下文
     let auth_context = request
         .extensions()
         .get::<AuthContext>()
         .cloned()
-        .ok_or(AuthError::Unauthorized)?;
+        .ok_or(AppError::Unauthorized)?;
 
     // 2. 保证 need-blacklist-check 开启（窗口 15 分钟）
     state

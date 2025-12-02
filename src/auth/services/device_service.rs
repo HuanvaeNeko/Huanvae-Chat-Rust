@@ -1,6 +1,7 @@
-use crate::auth::{errors::AuthError, models::Device};
-use sqlx::PgPool;
+use crate::auth::models::Device;
+use crate::common::AppError;
 use chrono::NaiveDateTime;
+use sqlx::PgPool;
 
 /// 设备管理服务
 pub struct DeviceService {
@@ -18,7 +19,7 @@ impl DeviceService {
         &self,
         user_id: &str,
         current_device_id: Option<&str>,
-    ) -> Result<Vec<Device>, AuthError> {
+    ) -> Result<Vec<Device>, AppError> {
         let rows: Vec<(String, Option<String>, Option<String>, Option<chrono::NaiveDateTime>, chrono::NaiveDateTime)> = sqlx::query_as(
             r#"
             SELECT "device-id", "device-info", "ip-address", "last-used-at", "created-at"
@@ -47,7 +48,7 @@ impl DeviceService {
     }
 
     /// 撤销指定设备（删除其 Refresh Token）
-    pub async fn revoke_device(&self, user_id: &str, device_id: &str) -> Result<(), AuthError> {
+    pub async fn revoke_device(&self, user_id: &str, device_id: &str) -> Result<(), AppError> {
         let result = sqlx::query(
             r#"
             UPDATE "user-refresh-tokens"
@@ -64,7 +65,7 @@ impl DeviceService {
         .await?;
 
         if result.rows_affected() == 0 {
-            return Err(AuthError::DeviceNotFound);
+            return Err(AppError::NotFound("设备".to_string()));
         }
 
         Ok(())
@@ -75,7 +76,7 @@ impl DeviceService {
         &self,
         user_id: &str,
         current_device_id: &str,
-    ) -> Result<u64, AuthError> {
+    ) -> Result<u64, AppError> {
         let result = sqlx::query(
             r#"
             UPDATE "user-refresh-tokens"
@@ -99,7 +100,7 @@ impl DeviceService {
         &self,
         user_id: &str,
         device_id: &str,
-    ) -> Result<Vec<(String, NaiveDateTime)>, AuthError> {
+    ) -> Result<Vec<(String, NaiveDateTime)>, AppError> {
         let rows: Vec<(String, NaiveDateTime)> = sqlx::query_as(
             r#"
             SELECT "jti", "exp" FROM "user-access-cache"

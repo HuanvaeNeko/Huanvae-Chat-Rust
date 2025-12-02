@@ -4,10 +4,9 @@ use axum::response::{IntoResponse, Json};
 use axum::Extension;
 use validator::Validate;
 
-use crate::auth::errors::AuthError;
 use crate::auth::middleware::AuthContext;
+use crate::common::AppError;
 use crate::friends_messages::models::{SendMessageRequest, SendMessageResponse};
-use crate::friends_messages::services::MessageService;
 
 use super::state::MessagesState;
 
@@ -16,22 +15,22 @@ pub async fn send_message_handler(
     State(state): State<MessagesState>,
     Extension(auth): Extension<AuthContext>,
     Json(req): Json<SendMessageRequest>,
-) -> Result<impl IntoResponse, AuthError> {
+) -> Result<impl IntoResponse, AppError> {
     // 1. 验证请求参数
     req.validate()
-        .map_err(|e| AuthError::BadRequest(format!("参数验证失败: {}", e)))?;
+        .map_err(|e| AppError::BadRequest(format!("参数验证失败: {}", e)))?;
 
     // 2. 验证消息类型
     let valid_types = ["text", "image", "video", "file"];
     if !valid_types.contains(&req.message_type.as_str()) {
-        return Err(AuthError::BadRequest(
+        return Err(AppError::BadRequest(
             "消息类型必须是: text, image, video, file".to_string(),
         ));
     }
 
     // 3. 调用服务发送消息
-    let message_service = MessageService::new(state.db.clone());
-    let (message_uuid, send_time) = message_service
+    let (message_uuid, send_time) = state
+        .service
         .send_message(
             &auth.user_id,
             &req.receiver_id,

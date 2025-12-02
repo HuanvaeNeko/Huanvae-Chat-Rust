@@ -1,8 +1,5 @@
-use crate::auth::{
-    errors::AuthError,
-    models::RefreshTokenRequest,
-    services::TokenService,
-};
+use crate::auth::{models::RefreshTokenRequest, services::TokenService};
+use crate::common::AppError;
 use axum::{extract::State, Json};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -17,7 +14,7 @@ pub struct RefreshTokenState {
 pub async fn refresh_token_handler(
     State(state): State<RefreshTokenState>,
     Json(req): Json<RefreshTokenRequest>,
-) -> Result<Json<Value>, AuthError> {
+) -> Result<Json<Value>, AppError> {
     // 使用 Refresh Token 换取新的 Access Token
     let access_token = state
         .token_service

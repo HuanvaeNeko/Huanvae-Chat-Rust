@@ -1,8 +1,8 @@
 use crate::auth::{
-    errors::AuthError,
     models::AccessTokenClaims,
     services::{BlacklistService, TokenService},
 };
+use crate::common::AppError;
 use axum::{
     extract::{Request, State},
     middleware::Next,
@@ -34,18 +34,18 @@ pub async fn auth_guard(
     State(state): State<AuthState>,
     mut request: Request,
     next: Next,
-) -> Result<Response, AuthError> {
+) -> Result<Response, AppError> {
     // 1. 从请求头提取 Token
     let auth_header = request
         .headers()
         .get("Authorization")
         .and_then(|h| h.to_str().ok())
-        .ok_or(AuthError::Unauthorized)?;
+        .ok_or(AppError::Unauthorized)?;
 
     // 2. 验证 Bearer 格式
     let token = auth_header
         .strip_prefix("Bearer ")
-        .ok_or(AuthError::InvalidToken)?;
+        .ok_or(AppError::InvalidToken)?;
 
     // 3. 验证并解析 Access Token
     let claims = state.token_service.verify_access_token(token)?;
@@ -63,7 +63,7 @@ pub async fn auth_guard(
     .await
     .map_err(|e| {
         tracing::warn!("查询用户失败: {}", e);
-        AuthError::InvalidToken
+        AppError::InvalidToken
     })?;
 
     let (need_check, check_expires_at) = user;
@@ -88,7 +88,7 @@ pub async fn auth_guard(
             } else {
                 // 未过期，执行黑名单检查
                 if state.blacklist_service.is_blacklisted(&claims.jti).await? {
-                    return Err(AuthError::TokenRevoked);
+                    return Err(AppError::TokenRevoked);
                 }
             }
         }
@@ -109,11 +109,11 @@ pub async fn auth_guard(
 }
 
 /// 从请求中提取认证上下文（在 Handler 中使用）
-pub fn extract_auth_context(request: &Request) -> Result<AuthContext, AuthError> {
+pub fn extract_auth_context(request: &Request) -> Result<AuthContext, AppError> {
     request
         .extensions()
         .get::<AuthContext>()
         .cloned()
-        .ok_or(AuthError::Unauthorized)
+        .ok_or(AppError::Unauthorized)
 }
 

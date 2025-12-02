@@ -45,14 +45,14 @@ impl DeduplicationService {
                     .grant_permission(&mapping.uuid, user_id, "owner", "upload")
                     .await?;
 
-                // 创建file_records记录
+                // 创建file-records记录
                 sqlx::query(
-                    "INSERT INTO file_records 
-                    (file_key, owner_id, file_type, storage_location, related_id,
-                     file_size, content_type, file_hash, physical_file_key, file_uuid, status,
-                     file_url, preview_support, created_at, completed_at, expires_at)
+                    r#"INSERT INTO "file-records" 
+                    ("file-key", "owner-id", "file-type", "storage-location", "related-id",
+                     "file-size", "content-type", "file-hash", "physical-file-key", "file-uuid", "status",
+                     "file-url", "preview-support", "created-at", "completed-at", "expires-at")
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'completed', $11, $12, NOW(), NOW(), NOW() + INTERVAL '1 year')
-                    ON CONFLICT (file_key) DO NOTHING"
+                    ON CONFLICT ("file-key") DO NOTHING"#
                 )
                 .bind(new_file_key)
                 .bind(user_id)
@@ -90,4 +90,3 @@ impl DeduplicationService {
         }
     }
 }
-

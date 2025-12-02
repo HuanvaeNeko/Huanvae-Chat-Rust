@@ -4,10 +4,9 @@ use axum::response::{IntoResponse, Json};
 use axum::Extension;
 use validator::Validate;
 
-use crate::auth::errors::AuthError;
 use crate::auth::middleware::AuthContext;
+use crate::common::AppError;
 use crate::friends_messages::models::{DeleteMessageRequest, SuccessResponse};
-use crate::friends_messages::services::MessageService;
 
 use super::state::MessagesState;
 
@@ -16,14 +15,14 @@ pub async fn delete_message_handler(
     State(state): State<MessagesState>,
     Extension(auth): Extension<AuthContext>,
     Json(req): Json<DeleteMessageRequest>,
-) -> Result<impl IntoResponse, AuthError> {
+) -> Result<impl IntoResponse, AppError> {
     // 1. 验证请求参数
     req.validate()
-        .map_err(|e| AuthError::BadRequest(format!("参数验证失败: {}", e)))?;
+        .map_err(|e| AppError::BadRequest(format!("参数验证失败: {}", e)))?;
 
     // 2. 调用服务删除消息
-    let message_service = MessageService::new(state.db.clone());
-    message_service
+    state
+        .service
         .delete_message(&auth.user_id, &req.message_uuid)
         .await?;
 

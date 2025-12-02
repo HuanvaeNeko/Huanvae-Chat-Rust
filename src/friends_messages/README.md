@@ -195,12 +195,12 @@ src/friends_messages/
 
 ### 会话 UUID 生成规则
 
+使用 `common` 模块的公共函数：
+
 ```rust
-fn generate_conversation_uuid(user_id_1: &str, user_id_2: &str) -> String {
-    let mut ids = vec![user_id_1, user_id_2];
-    ids.sort();  // 排序确保一致性
-    format!("conv-{}-{}", ids[0], ids[1])
-}
+use crate::common::generate_conversation_uuid;
+
+let conversation_uuid = generate_conversation_uuid(user_id_1, user_id_2);
 ```
 
 **示例**:
@@ -209,10 +209,18 @@ fn generate_conversation_uuid(user_id_1: &str, user_id_2: &str) -> String {
 
 ### 好友关系验证
 
+使用 `friends::services` 模块的公共函数：
+
+```rust
+use crate::friends::services::verify_friendship;
+
+let is_friend = verify_friendship(&db, user_id, friend_id).await?;
+```
+
 发送消息前必须验证双方是否为好友：
-1. 查询发送者的 `user-owned-friends` 字段
-2. 解析 TEXT 字段，检查是否包含接收者的 `friend-id`
-3. 验证 `status=active`
+1. 查询 `friendships` 表
+2. 检查是否存在 `user_id` 和 `friend_id` 的记录
+3. 验证 `status = 'active'`
 
 ### 软删除机制
 
@@ -301,21 +309,22 @@ curl -X POST "http://localhost:8080/api/messages/recall" \
 
 ## 错误处理
 
-所有错误统一使用 `AuthError` 类型：
+所有错误统一使用 `AppError` 类型（`crate::common::AppError`）：
 
 ```rust
-pub enum AuthError {
-    Unauthorized,              // 401 - Token 无效
-    Forbidden,                 // 403 - 无权限
-    BadRequest(String),        // 400 - 参数错误
-    UserAlreadyExists,         // 409 - 用户已存在
-    InvalidCredentials,        // 401 - 凭证无效
-    TokenExpired,             // 401 - Token 过期
-    TokenRevoked,             // 401 - Token 已撤销
-    InvalidToken,             // 401 - Token 格式错误
-    InternalServerError,      // 500 - 服务器错误
-    DatabaseError(sqlx::Error), // 数据库错误
-    CryptoError(String),      // 加密错误
+pub enum AppError {
+    Unauthorized,              // 401 - 未授权访问
+    InvalidCredentials,        // 401 - 用户名或密码错误
+    InvalidToken,              // 401 - Token 无效或已过期
+    TokenRevoked,              // 401 - Token 已被撤销
+    Forbidden,                 // 403 - 权限不足
+    NotFound(String),          // 404 - 资源不存在
+    BadRequest(String),        // 400 - 请求参数错误
+    ValidationError(String),   // 400 - 验证错误
+    Conflict(String),          // 409 - 资源冲突
+    Internal,                  // 500 - 内部服务器错误
+    Database(String),          // 500 - 数据库错误
+    Storage(String),           // 500 - 存储服务错误
 }
 ```
 

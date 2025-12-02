@@ -1,4 +1,4 @@
-use crate::auth::errors::AuthError;
+use crate::common::AppError;
 use crate::auth::middleware::AuthContext;
 use crate::friends::models::{
     ApproveFriendRequest, RejectFriendRequest, RemoveFriendRequest, SubmitFriendRequest,
@@ -10,29 +10,29 @@ use uuid::Uuid;
 
 /// 好友服务
 #[derive(Clone)]
-pub struct FriendsState {
+pub struct FriendsService {
     pub db: PgPool,
 }
 
-impl FriendsState {
+impl FriendsService {
     pub fn new(db: PgPool) -> Self {
         Self { db }
     }
 }
 
-fn ensure_user_id_matches_token(req_user_id: &str, auth: &AuthContext) -> Result<(), AuthError> {
+fn ensure_user_id_matches_token(req_user_id: &str, auth: &AuthContext) -> Result<(), AppError> {
     if req_user_id != auth.user_id {
-        return Err(AuthError::Unauthorized);
+        return Err(AppError::Unauthorized);
     }
     Ok(())
 }
 
 /// 提交好友请求
 pub async fn submit_request(
-    state: &FriendsState,
+    state: &FriendsService,
     auth: &AuthContext,
     body: SubmitFriendRequest,
-) -> Result<SubmitFriendResponse, AuthError> {
+) -> Result<SubmitFriendResponse, AppError> {
     ensure_user_id_matches_token(&body.user_id, auth)?;
 
     // 检查目标用户是否存在
@@ -44,17 +44,17 @@ pub async fn submit_request(
     .await
     .map_err(|e| {
         tracing::error!("查询目标用户失败: {}", e);
-        AuthError::InternalServerError
+        AppError::Internal
     })?;
 
     if target_exists.is_none() {
-        return Err(AuthError::BadRequest("目标用户不存在".to_string()));
+        return Err(AppError::BadRequest("目标用户不存在".to_string()));
     }
 
     // 检查是否已经是好友
     let already_friends: Option<(Uuid,)> = sqlx::query_as(
-        r#"SELECT id FROM friendships 
-           WHERE user_id = $1 AND friend_id = $2 AND status = 'active'"#,
+        r#"SELECT "id" FROM "friendships" 
+           WHERE "user-id" = $1 AND "friend-id" = $2 AND "status" = 'active'"#,
     )
     .bind(&body.user_id)
     .bind(&body.target_user_id)
@@ -62,17 +62,17 @@ pub async fn submit_request(
     .await
     .map_err(|e| {
         tracing::error!("查询好友关系失败: {}", e);
-        AuthError::InternalServerError
+        AppError::Internal
     })?;
 
     if already_friends.is_some() {
-        return Err(AuthError::BadRequest("已经是好友关系".to_string()));
+        return Err(AppError::BadRequest("已经是好友关系".to_string()));
     }
 
     // 检查是否有对方发来的待处理请求（自动互通过）
     let reverse_request: Option<(Uuid,)> = sqlx::query_as(
-        r#"SELECT id FROM friend_requests 
-           WHERE from_user_id = $1 AND to_user_id = $2 AND status = 'pending'"#,
+        r#"SELECT "id" FROM "friend-requests" 
+           WHERE "from-user-id" = $1 AND "to-user-id" = $2 AND "status" = 'pending'"#,
     )
     .bind(&body.target_user_id)
     .bind(&body.user_id)
@@ -80,7 +80,7 @@ pub async fn submit_request(
     .await
     .map_err(|e| {
         tracing::error!("查询反向好友请求失败: {}", e);
-        AuthError::InternalServerError
+        AppError::Internal
     })?;
 
     if let Some((reverse_id,)) = reverse_request {
@@ -88,12 +88,12 @@ pub async fn submit_request(
         let mut tx = state.db.begin().await
             .map_err(|e| {
                 tracing::error!("开始事务失败 [自动互通过]: {}", e);
-                AuthError::InternalServerError
+                AppError::Internal
             })?;
 
         // 更新对方请求为已同意
         sqlx::query(
-            r#"UPDATE friend_requests SET status = 'approved', "updated-at" = $1 WHERE id = $2"#,
+            r#"UPDATE "friend-requests" SET "status" = 'approved', "updated-at" = $1 WHERE "id" = $2"#,
         )
         .bind(Utc::now())
         .bind(reverse_id)
@@ -101,7 +101,7 @@ pub async fn submit_request(
         .await
         .map_err(|e| {
             tracing::error!("更新好友请求状态失败 [自动互通过]: {}", e);
-            AuthError::InternalServerError
+            AppError::Internal
         })?;
 
         // 建立双向好友关系
@@ -112,7 +112,7 @@ pub async fn submit_request(
         tx.commit().await
             .map_err(|e| {
                 tracing::error!("提交事务失败 [自动互通过]: {}", e);
-                AuthError::InternalServerError
+                AppError::Internal
             })?;
 
         return Ok(SubmitFriendResponse {
@@ -122,8 +122,8 @@ pub async fn submit_request(
 
     // 检查是否已有待处理的请求
     let existing_request: Option<(Uuid,)> = sqlx::query_as(
-        r#"SELECT id FROM friend_requests 
-           WHERE from_user_id = $1 AND to_user_id = $2 AND status = 'pending'"#,
+        r#"SELECT "id" FROM "friend-requests" 
+           WHERE "from-user-id" = $1 AND "to-user-id" = $2 AND "status" = 'pending'"#,
     )
     .bind(&body.user_id)
     .bind(&body.target_user_id)
@@ -131,17 +131,17 @@ pub async fn submit_request(
     .await
     .map_err(|e| {
         tracing::error!("查询已有好友请求失败: {}", e);
-        AuthError::InternalServerError
+        AppError::Internal
     })?;
 
     if existing_request.is_some() {
-        return Err(AuthError::BadRequest("已有待处理的好友请求".to_string()));
+        return Err(AppError::BadRequest("已有待处理的好友请求".to_string()));
     }
 
     // 创建新的好友请求
     let request_id = Uuid::now_v7();
     sqlx::query(
-        r#"INSERT INTO friend_requests (id, from_user_id, to_user_id, message, status, "created-at", "updated-at")
+        r#"INSERT INTO "friend-requests" ("id", "from-user-id", "to-user-id", "message", "status", "created-at", "updated-at")
            VALUES ($1, $2, $3, $4, 'pending', $5, $5)"#,
     )
     .bind(request_id)
@@ -153,7 +153,7 @@ pub async fn submit_request(
     .await
     .map_err(|e| {
         tracing::error!("创建好友请求失败: {}", e);
-        AuthError::InternalServerError
+        AppError::Internal
     })?;
 
     Ok(SubmitFriendResponse {
@@ -163,16 +163,16 @@ pub async fn submit_request(
 
 /// 同意好友请求
 pub async fn approve_request(
-    state: &FriendsState,
+    state: &FriendsService,
     auth: &AuthContext,
     body: ApproveFriendRequest,
-) -> Result<(), AuthError> {
+) -> Result<(), AppError> {
     ensure_user_id_matches_token(&body.user_id, auth)?;
 
     // 查找待处理的请求
     let request: Option<(Uuid,)> = sqlx::query_as(
-        r#"SELECT id FROM friend_requests 
-           WHERE from_user_id = $1 AND to_user_id = $2 AND status = 'pending'"#,
+        r#"SELECT "id" FROM "friend-requests" 
+           WHERE "from-user-id" = $1 AND "to-user-id" = $2 AND "status" = 'pending'"#,
     )
     .bind(&body.applicant_user_id)
     .bind(&body.user_id)
@@ -180,21 +180,21 @@ pub async fn approve_request(
     .await
     .map_err(|e| {
         tracing::error!("查询待处理好友请求失败: {}", e);
-        AuthError::InternalServerError
+        AppError::Internal
     })?;
 
-    let (request_id,) = request.ok_or(AuthError::BadRequest("好友请求不存在".to_string()))?;
+    let (request_id,) = request.ok_or(AppError::BadRequest("好友请求不存在".to_string()))?;
 
     // 🔒 使用事务处理同意请求
     let mut tx = state.db.begin().await
         .map_err(|e| {
             tracing::error!("开始事务失败 [同意好友请求]: {}", e);
-            AuthError::InternalServerError
+            AppError::Internal
         })?;
 
     // 更新请求状态
     sqlx::query(
-        r#"UPDATE friend_requests SET status = 'approved', "updated-at" = $1 WHERE id = $2"#,
+        r#"UPDATE "friend-requests" SET "status" = 'approved', "updated-at" = $1 WHERE "id" = $2"#,
     )
     .bind(Utc::now())
     .bind(request_id)
@@ -202,7 +202,7 @@ pub async fn approve_request(
     .await
     .map_err(|e| {
         tracing::error!("更新好友请求状态失败 [同意]: {}", e);
-        AuthError::InternalServerError
+        AppError::Internal
     })?;
 
     // 建立双向好友关系
@@ -213,7 +213,7 @@ pub async fn approve_request(
     tx.commit().await
         .map_err(|e| {
             tracing::error!("提交事务失败 [同意好友请求]: {}", e);
-            AuthError::InternalServerError
+            AppError::Internal
         })?;
 
     Ok(())
@@ -221,17 +221,17 @@ pub async fn approve_request(
 
 /// 拒绝好友请求
 pub async fn reject_request(
-    state: &FriendsState,
+    state: &FriendsService,
     auth: &AuthContext,
     body: RejectFriendRequest,
-) -> Result<(), AuthError> {
+) -> Result<(), AppError> {
     ensure_user_id_matches_token(&body.user_id, auth)?;
 
     // 更新请求状态为拒绝（单个操作，不需要事务）
     let result = sqlx::query(
-        r#"UPDATE friend_requests 
-           SET status = 'rejected', reject_reason = $1, "updated-at" = $2 
-           WHERE from_user_id = $3 AND to_user_id = $4 AND status = 'pending'"#,
+        r#"UPDATE "friend-requests" 
+           SET "status" = 'rejected', "reject-reason" = $1, "updated-at" = $2 
+           WHERE "from-user-id" = $3 AND "to-user-id" = $4 AND "status" = 'pending'"#,
     )
     .bind(&body.reject_reason)
     .bind(Utc::now())
@@ -241,11 +241,11 @@ pub async fn reject_request(
     .await
     .map_err(|e| {
         tracing::error!("更新好友请求状态失败 [拒绝]: {}", e);
-        AuthError::InternalServerError
+        AppError::Internal
     })?;
 
     if result.rows_affected() == 0 {
-        return Err(AuthError::BadRequest("好友请求不存在".to_string()));
+        return Err(AppError::BadRequest("好友请求不存在".to_string()));
     }
 
     Ok(())
@@ -253,10 +253,10 @@ pub async fn reject_request(
 
 /// 删除好友
 pub async fn remove_friend(
-    state: &FriendsState,
+    state: &FriendsService,
     auth: &AuthContext,
     body: RemoveFriendRequest,
-) -> Result<(), AuthError> {
+) -> Result<(), AppError> {
     ensure_user_id_matches_token(&body.user_id, auth)?;
 
     let now = Utc::now();
@@ -265,14 +265,14 @@ pub async fn remove_friend(
     let mut tx = state.db.begin().await
         .map_err(|e| {
             tracing::error!("开始事务失败 [删除好友]: {}", e);
-            AuthError::InternalServerError
+            AppError::Internal
         })?;
 
     // 更新用户方的好友关系状态为 ended
     sqlx::query(
-        r#"UPDATE friendships 
-           SET status = 'ended', end_time = $1, end_reason = $2 
-           WHERE user_id = $3 AND friend_id = $4 AND status = 'active'"#,
+        r#"UPDATE "friendships" 
+           SET "status" = 'ended', "end-time" = $1, "end-reason" = $2 
+           WHERE "user-id" = $3 AND "friend-id" = $4 AND "status" = 'active'"#,
     )
     .bind(now)
     .bind(&body.remove_reason)
@@ -282,14 +282,14 @@ pub async fn remove_friend(
     .await
     .map_err(|e| {
         tracing::error!("更新好友关系状态失败 [用户方]: {}", e);
-        AuthError::InternalServerError
+        AppError::Internal
     })?;
 
     // 更新好友方的好友关系状态为 ended
     sqlx::query(
-        r#"UPDATE friendships 
-           SET status = 'ended', end_time = $1, end_reason = $2 
-           WHERE user_id = $3 AND friend_id = $4 AND status = 'active'"#,
+        r#"UPDATE "friendships" 
+           SET "status" = 'ended', "end-time" = $1, "end-reason" = $2 
+           WHERE "user-id" = $3 AND "friend-id" = $4 AND "status" = 'active'"#,
     )
     .bind(now)
     .bind(&body.remove_reason)
@@ -299,14 +299,14 @@ pub async fn remove_friend(
     .await
     .map_err(|e| {
         tracing::error!("更新好友关系状态失败 [好友方]: {}", e);
-        AuthError::InternalServerError
+        AppError::Internal
     })?;
 
     // 提交事务
     tx.commit().await
         .map_err(|e| {
             tracing::error!("提交事务失败 [删除好友]: {}", e);
-            AuthError::InternalServerError
+            AppError::Internal
         })?;
 
     Ok(())
@@ -317,11 +317,11 @@ async fn create_friendship_tx(
     tx: &mut Transaction<'_, Postgres>,
     user_id: &str,
     friend_id: &str,
-) -> Result<(), AuthError> {
+) -> Result<(), AppError> {
     sqlx::query(
-        r#"INSERT INTO friendships (user_id, friend_id, status, add_time)
+        r#"INSERT INTO "friendships" ("user-id", "friend-id", "status", "add-time")
            VALUES ($1, $2, 'active', $3)
-           ON CONFLICT (user_id, friend_id) DO UPDATE SET status = 'active', add_time = $3, end_time = NULL, end_reason = NULL"#,
+           ON CONFLICT ("user-id", "friend-id") DO UPDATE SET "status" = 'active', "add-time" = $3, "end-time" = NULL, "end-reason" = NULL"#,
     )
     .bind(user_id)
     .bind(friend_id)
@@ -330,17 +330,17 @@ async fn create_friendship_tx(
     .await
     .map_err(|e| {
         tracing::error!("创建好友关系失败 [user_id={}, friend_id={}]: {}", user_id, friend_id, e);
-        AuthError::InternalServerError
+        AppError::Internal
     })?;
 
     Ok(())
 }
 
 /// 验证好友关系（供其他模块调用）
-pub async fn verify_friendship(db: &PgPool, user_id: &str, friend_id: &str) -> Result<bool, AuthError> {
+pub async fn verify_friendship(db: &PgPool, user_id: &str, friend_id: &str) -> Result<bool, AppError> {
     let result: Option<(Uuid,)> = sqlx::query_as(
-        r#"SELECT id FROM friendships 
-           WHERE user_id = $1 AND friend_id = $2 AND status = 'active'"#,
+        r#"SELECT "id" FROM "friendships" 
+           WHERE "user-id" = $1 AND "friend-id" = $2 AND "status" = 'active'"#,
     )
     .bind(user_id)
     .bind(friend_id)
@@ -348,7 +348,7 @@ pub async fn verify_friendship(db: &PgPool, user_id: &str, friend_id: &str) -> R
     .await
     .map_err(|e| {
         tracing::error!("验证好友关系失败 [user_id={}, friend_id={}]: {}", user_id, friend_id, e);
-        AuthError::InternalServerError
+        AppError::Internal
     })?;
 
     Ok(result.is_some())

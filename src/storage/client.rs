@@ -10,18 +10,18 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, warn};
 
-use super::config::S3Config;
+use crate::config::MinioConfig;
 
 /// S3/MinIO 客户端封装
 #[derive(Clone)]
 pub struct S3Client {
     client: Arc<Client>,
-    config: S3Config,
+    config: MinioConfig,
 }
 
 impl S3Client {
     /// 创建新的 S3 客户端
-    pub async fn new(config: S3Config) -> Result<Self, anyhow::Error> {
+    pub async fn new(config: MinioConfig) -> Result<Self, anyhow::Error> {
         // 创建凭证
         let credentials = Credentials::new(
             &config.access_key,
@@ -203,7 +203,7 @@ impl S3Client {
     }
 
     /// 获取配置
-    pub fn config(&self) -> &S3Config {
+    pub fn config(&self) -> &MinioConfig {
         &self.config
     }
 

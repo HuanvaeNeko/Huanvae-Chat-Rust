@@ -1,9 +1,9 @@
 use crate::auth::{
-    errors::AuthError,
     middleware::AuthContext,
     models::DeviceListResponse,
     services::{BlacklistService, DeviceService},
 };
+use crate::common::AppError;
 use axum::{
     extract::{Path, Request, State},
     Json,
@@ -22,13 +22,13 @@ pub struct DeviceState {
 pub async fn list_devices_handler(
     State(state): State<DeviceState>,
     request: Request,
-) -> Result<Json<DeviceListResponse>, AuthError> {
+) -> Result<Json<DeviceListResponse>, AppError> {
     // 从请求中提取认证上下文
     let auth_context = request
         .extensions()
         .get::<AuthContext>()
         .cloned()
-        .ok_or(AuthError::Unauthorized)?;
+        .ok_or(AppError::Unauthorized)?;
 
     // 查询设备列表
     let devices = state
@@ -46,13 +46,13 @@ pub async fn revoke_device_handler(
     State(state): State<DeviceState>,
     Path(device_id): Path<String>,
     request: Request,
-) -> Result<Json<Value>, AuthError> {
+) -> Result<Json<Value>, AppError> {
     // 从请求中提取认证上下文
     let auth_context = request
         .extensions()
         .get::<AuthContext>()
         .cloned()
-        .ok_or(AuthError::Unauthorized)?;
+        .ok_or(AppError::Unauthorized)?;
 
     // 启用黑名单检查（窗口 15 分钟）
     state

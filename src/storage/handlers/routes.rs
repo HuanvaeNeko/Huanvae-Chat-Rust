@@ -27,7 +27,7 @@ pub fn create_storage_routes(
     // 上传相关路由
     let upload_router = Router::new()
         .route("/upload/request", post(request_upload))
-        .route("/multipart/part-url", get(get_multipart_part_url))
+        .route("/multipart/part_url", get(get_multipart_part_url))
         .route_layer(middleware::from_fn_with_state(
             auth_state.clone(),
             crate::auth::middleware::auth_guard,
@@ -38,8 +38,8 @@ pub fn create_storage_routes(
     
     // 预签名URL路由
     let presigned_router = Router::new()
-        .route("/file/{uuid}/presigned-url", post(generate_presigned_url))
-        .route("/file/{uuid}/presigned-url/extended", post(generate_extended_presigned_url))
+        .route("/file/{uuid}/presigned_url", post(generate_presigned_url))
+        .route("/file/{uuid}/presigned_url/extended", post(generate_extended_presigned_url))
         .route_layer(middleware::from_fn_with_state(
             auth_state.clone(),
             crate::auth::middleware::auth_guard,
@@ -60,4 +60,3 @@ pub fn create_storage_routes(
         .merge(presigned_router)
         .merge(query_router)
 }
-

@@ -5,6 +5,7 @@ use sqlx::Row;
 use std::sync::Arc;
 use tracing::info;
 
+use crate::common::generate_conversation_uuid;
 use crate::config::storage_config;
 use crate::storage::client::S3Client;
 use crate::storage::models::*;
@@ -218,7 +219,7 @@ impl FileService {
 
         // 保存upload_id
         sqlx::query(
-            "UPDATE file_records SET multipart_upload_id = $1 WHERE file_key = $2"
+            r#"UPDATE "file-records" SET "multipart-upload-id" = $1 WHERE "file-key" = $2"#
         )
         .bind(&upload_id)
         .bind(file_key)
@@ -274,7 +275,7 @@ impl FileService {
             StorageLocation::FriendMessages => {
                 // friends-file/{conversation-uuid}/{type}/{timestamp}_{hash}_{filename}.ext
                 let friend_id = related_id.unwrap_or("unknown");
-                let conversation_uuid = Self::generate_conversation_uuid(user_id, friend_id);
+                let conversation_uuid = generate_conversation_uuid(user_id, friend_id);
                 let type_dir = match file_type {
                     FileType::FriendImage | FileType::FriendImageFile => "images",
                     FileType::FriendVideo | FileType::FriendVideoFile => "videos",
@@ -297,13 +298,6 @@ impl FileService {
                     group_id, type_dir, timestamp, hash_prefix, sanitized_name)
             }
         }
-    }
-
-    /// 生成会话UUID（用户ID排序组合）
-    fn generate_conversation_uuid(user_id1: &str, user_id2: &str) -> String {
-        let mut ids = vec![user_id1, user_id2];
-        ids.sort();
-        format!("{}_{}", ids[0], ids[1])
     }
 
     /// 生成一次性上传Token
@@ -336,12 +330,12 @@ impl FileService {
         let expires_at = Utc::now() + chrono::Duration::seconds(expires_in as i64);
         
         sqlx::query(
-            "INSERT INTO file_records 
-            (file_key, owner_id, file_type, storage_location, related_id,
-             file_size, content_type, file_hash, upload_token, status,
-             created_at, expires_at, preview_support)
+            r#"INSERT INTO "file-records" 
+            ("file-key", "owner-id", "file-type", "storage-location", "related-id",
+             "file-size", "content-type", "file-hash", "upload-token", "status",
+             "created-at", "expires-at", "preview-support")
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', NOW(), $10, $11)
-            ON CONFLICT (file_key) DO NOTHING"
+            ON CONFLICT ("file-key") DO NOTHING"#
         )
         .bind(file_key)
         .bind(owner_id)
@@ -366,10 +360,10 @@ impl FileService {
         token: &str,
     ) -> Result<FileRecord> {
         let record = sqlx::query_as::<_, FileRecord>(
-            "SELECT * FROM file_records
-            WHERE upload_token = $1
-              AND status = 'pending'
-              AND expires_at > NOW()"
+            r#"SELECT * FROM "file-records"
+            WHERE "upload-token" = $1
+              AND "status" = 'pending'
+              AND "expires-at" > NOW()"#
         )
         .bind(token)
         .fetch_optional(&self.db)
@@ -403,17 +397,17 @@ impl FileService {
         // 生成UUID访问URL
         let uuid_file_url = format!("{}/api/storage/file/{}", self.api_base_url, file_uuid);
         
-        // 更新file_records
+        // 更新file-records
         let result = sqlx::query(
-            "UPDATE file_records 
-            SET status = 'completed',
-                upload_token = NULL,
-                file_url = $3,
-                file_uuid = $4,
-                completed_at = NOW()
-            WHERE upload_token = $1
-              AND file_hash = $2
-              AND status = 'pending'"
+            r#"UPDATE "file-records" 
+            SET "status" = 'completed',
+                "upload-token" = NULL,
+                "file-url" = $3,
+                "file-uuid" = $4,
+                "completed-at" = NOW()
+            WHERE "upload-token" = $1
+              AND "file-hash" = $2
+              AND "status" = 'pending'"#
         )
         .bind(token)
         .bind(actual_hash)
@@ -450,11 +444,11 @@ impl FileService {
     ) -> Result<MultipartPartResponse> {
         // 验证upload_id属于该用户
         let record = sqlx::query_as::<_, FileRecord>(
-            "SELECT * FROM file_records
-            WHERE file_key = $1
-              AND multipart_upload_id = $2
-              AND owner_id = $3
-              AND status = 'pending'"
+            r#"SELECT * FROM "file-records"
+            WHERE "file-key" = $1
+              AND "multipart-upload-id" = $2
+              AND "owner-id" = $3
+              AND "status" = 'pending'"#
         )
         .bind(file_key)
         .bind(upload_id)
@@ -487,29 +481,29 @@ impl FileService {
         expires_in: u32,
     ) -> Result<PresignedUrlResponse> {
         // 1. 查询UUID映射表获取物理文件信息
-        let mapping = sqlx::query!(
+        let mapping: UuidMappingRecord = sqlx::query_as(
             r#"
-            SELECT uuid, physical_file_key, file_hash, file_size, content_type,
-                   preview_support, first_uploader_id, created_at
-            FROM file_uuid_mapping
-            WHERE uuid = $1
-            "#,
-            file_uuid
+            SELECT "uuid", "physical-file-key", "file-hash", "file-size", "content-type",
+                   "preview-support", "first-uploader-id", "created-at"
+            FROM "file-uuid-mapping"
+            WHERE "uuid" = $1
+            "#
         )
+        .bind(file_uuid)
         .fetch_optional(&self.db)
         .await?
         .ok_or_else(|| anyhow::anyhow!("文件不存在"))?;
 
         // 2. 验证用户权限
-        let _permission = sqlx::query!(
+        let _permission: PermissionRecord = sqlx::query_as(
             r#"
-            SELECT id, access_type, granted_at, revoked_at
-            FROM file_access_permissions
-            WHERE file_uuid = $1 AND user_id = $2 AND revoked_at IS NULL
-            "#,
-            file_uuid,
-            user_id
+            SELECT "id", "access-type", "granted-at", "revoked-at"
+            FROM "file-access-permissions"
+            WHERE "file-uuid" = $1 AND "user-id" = $2 AND "revoked-at" IS NULL
+            "#
         )
+        .bind(file_uuid)
+        .bind(user_id)
         .fetch_optional(&self.db)
         .await?
         .ok_or_else(|| anyhow::anyhow!("无权访问此文件"))?;
@@ -574,8 +568,8 @@ impl FileService {
         
         // 2. 确定排序字段
         let sort_column = match sort_by.as_str() {
-            "file_size" => "m.file_size",
-            _ => "m.created_at",
+            "file_size" => r#"m."file-size""#,
+            _ => r#"m."created-at""#,
         };
         let sort_dir = if sort_order == "asc" { "ASC" } else { "DESC" };
         
@@ -583,9 +577,9 @@ impl FileService {
         let total: i64 = sqlx::query_scalar(
             r#"
             SELECT COUNT(*) as count
-            FROM file_uuid_mapping m
-            INNER JOIN file_access_permissions p ON m.uuid = p.file_uuid
-            WHERE p.user_id = $1 AND p.revoked_at IS NULL
+            FROM "file-uuid-mapping" m
+            INNER JOIN "file-access-permissions" p ON m."uuid" = p."file-uuid"
+            WHERE p."user-id" = $1 AND p."revoked-at" IS NULL
             "#
         )
         .bind(user_id)
@@ -596,11 +590,11 @@ impl FileService {
         let query_sql = format!(
             r#"
             SELECT 
-                m.uuid, m.physical_file_key, m.file_size, 
-                m.content_type, m.preview_support, m.created_at
-            FROM file_uuid_mapping m
-            INNER JOIN file_access_permissions p ON m.uuid = p.file_uuid
-            WHERE p.user_id = $1 AND p.revoked_at IS NULL
+                m."uuid", m."physical-file-key", m."file-size", 
+                m."content-type", m."preview-support", m."created-at"
+            FROM "file-uuid-mapping" m
+            INNER JOIN "file-access-permissions" p ON m."uuid" = p."file-uuid"
+            WHERE p."user-id" = $1 AND p."revoked-at" IS NULL
             ORDER BY {} {}
             LIMIT $2 OFFSET $3
             "#,
@@ -620,16 +614,16 @@ impl FileService {
             .into_iter()
             .map(|row| {
                 let uuid: String = row.try_get("uuid").unwrap_or_default();
-                let physical_key: String = row.try_get("physical_file_key").unwrap_or_default();
+                let physical_key: String = row.try_get("physical-file-key").unwrap_or_default();
                 let filename = Self::extract_filename_from_key(&physical_key);
                 
                 FileItem {
                     file_uuid: uuid.clone(),
                     filename,
-                    file_size: row.try_get("file_size").unwrap_or(0),
-                    content_type: row.try_get("content_type").unwrap_or_default(),
-                    preview_support: row.try_get("preview_support").unwrap_or_default(),
-                    created_at: row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+                    file_size: row.try_get("file-size").unwrap_or(0),
+                    content_type: row.try_get("content-type").unwrap_or_default(),
+                    preview_support: row.try_get("preview-support").unwrap_or_default(),
+                    created_at: row.try_get::<chrono::DateTime<chrono::Utc>, _>("created-at")
                         .map(|dt| dt.to_rfc3339())
                         .unwrap_or_default(),
                     file_url: format!("{}/api/storage/file/{}", self.api_base_url, uuid),
@@ -670,17 +664,28 @@ impl FileService {
 /// 数据库文件记录结构
 #[derive(sqlx::FromRow)]
 pub struct FileRecord {
+    #[sqlx(rename = "file-key")]
     pub file_key: String,
+    #[sqlx(rename = "owner-id")]
     pub owner_id: String,
+    #[sqlx(rename = "file-type")]
     pub file_type: String,
+    #[sqlx(rename = "storage-location")]
     pub storage_location: String,
+    #[sqlx(rename = "related-id")]
     pub related_id: Option<String>,
+    #[sqlx(rename = "file-size")]
     pub file_size: i64,
+    #[sqlx(rename = "content-type")]
     pub content_type: String,
+    #[sqlx(rename = "file-hash")]
     pub file_hash: String,
+    #[sqlx(rename = "upload-token")]
     pub upload_token: Option<String>,
+    #[sqlx(rename = "multipart-upload-id")]
     pub multipart_upload_id: Option<String>,
     pub status: String,
+    #[sqlx(rename = "preview-support")]
     pub preview_support: String,
 }
 
@@ -694,3 +699,36 @@ impl FileRecord {
     }
 }
 
+/// UUID映射记录结构
+#[derive(sqlx::FromRow)]
+#[allow(dead_code)]
+struct UuidMappingRecord {
+    uuid: String,
+    #[sqlx(rename = "physical-file-key")]
+    physical_file_key: String,
+    #[sqlx(rename = "file-hash")]
+    file_hash: String,
+    #[sqlx(rename = "file-size")]
+    file_size: i64,
+    #[sqlx(rename = "content-type")]
+    content_type: String,
+    #[sqlx(rename = "preview-support")]
+    preview_support: String,
+    #[sqlx(rename = "first-uploader-id")]
+    first_uploader_id: String,
+    #[sqlx(rename = "created-at")]
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// 权限记录结构
+#[derive(sqlx::FromRow)]
+#[allow(dead_code)]
+struct PermissionRecord {
+    id: uuid::Uuid,
+    #[sqlx(rename = "access-type")]
+    access_type: String,
+    #[sqlx(rename = "granted-at")]
+    granted_at: chrono::DateTime<chrono::Utc>,
+    #[sqlx(rename = "revoked-at")]
+    revoked_at: Option<chrono::DateTime<chrono::Utc>>,
+}

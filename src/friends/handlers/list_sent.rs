@@ -1,6 +1,7 @@
 use axum::{extract::{State, Request}, Json};
 use crate::friends::models::{ListResponse, SentRequestDto};
-use crate::auth::{errors::AuthError, middleware::extract_auth_context};
+use crate::auth::middleware::extract_auth_context;
+use crate::common::AppError;
 use sqlx::PgPool;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -11,20 +12,20 @@ pub struct ListState { pub db: PgPool }
 pub async fn list_sent_requests_handler(
     State(state): State<ListState>,
     request: Request,
-) -> Result<Json<ListResponse<SentRequestDto>>, AuthError> {
+) -> Result<Json<ListResponse<SentRequestDto>>, AppError> {
     let auth = extract_auth_context(&request)?;
     
     // 查询我发出的待处理好友请求
     let requests: Vec<(Uuid, String, String, DateTime<Utc>)> = sqlx::query_as(
-        r#"SELECT id, to_user_id, message, "created-at"
-           FROM friend_requests
-           WHERE from_user_id = $1 AND status = 'pending'
+        r#"SELECT "id", "to-user-id", "message", "created-at"
+           FROM "friend-requests"
+           WHERE "from-user-id" = $1 AND "status" = 'pending'
            ORDER BY "created-at" DESC"#,
     )
     .bind(&auth.user_id)
     .fetch_all(&state.db)
     .await
-    .map_err(|_| AuthError::InternalServerError)?;
+    .map_err(|_| AppError::Internal)?;
 
     let items = requests
         .into_iter()

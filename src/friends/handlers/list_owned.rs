@@ -1,6 +1,7 @@
 use axum::{extract::{State, Request}, Json};
 use crate::friends::models::{ListResponse, FriendDto};
-use crate::auth::{errors::AuthError, middleware::extract_auth_context};
+use crate::auth::middleware::extract_auth_context;
+use crate::common::AppError;
 use sqlx::PgPool;
 use chrono::{DateTime, Utc};
 
@@ -10,21 +11,21 @@ pub struct ListState { pub db: PgPool }
 pub async fn list_owned_friends_handler(
     State(state): State<ListState>,
     request: Request,
-) -> Result<Json<ListResponse<FriendDto>>, AuthError> {
+) -> Result<Json<ListResponse<FriendDto>>, AppError> {
     let auth = extract_auth_context(&request)?;
     
     // 查询好友关系表，关联用户表获取昵称
     let friends: Vec<(String, Option<String>, DateTime<Utc>)> = sqlx::query_as(
-        r#"SELECT f.friend_id, u."user-nickname", f.add_time
-           FROM friendships f
-           LEFT JOIN users u ON u."user-id" = f.friend_id
-           WHERE f.user_id = $1 AND f.status = 'active'
-           ORDER BY f.add_time DESC"#,
+        r#"SELECT f."friend-id", u."user-nickname", f."add-time"
+           FROM "friendships" f
+           LEFT JOIN "users" u ON u."user-id" = f."friend-id"
+           WHERE f."user-id" = $1 AND f."status" = 'active'
+           ORDER BY f."add-time" DESC"#,
     )
     .bind(&auth.user_id)
     .fetch_all(&state.db)
     .await
-    .map_err(|_| AuthError::InternalServerError)?;
+    .map_err(|_| AppError::Internal)?;
 
     let items = friends
         .into_iter()

@@ -8,6 +8,7 @@
 src/friends/
   ├─ handlers/         // HTTP 请求处理器层
   │   ├─ routes.rs     // 路由定义
+  │   ├─ state.rs      // FriendsState（Handler 层状态）
   │   ├─ create_request.rs
   │   ├─ approve_request.rs
   │   ├─ reject_request.rs
@@ -19,9 +20,29 @@ src/friends/
   │   ├─ request.rs    // 请求体模型
   │   └─ list.rs       // 列表响应模型
   ├─ services/         // 业务逻辑与数据读写
-  │   └─ friends_service.rs
+  │   └─ friends_service.rs  // FriendsService（业务服务）
   └─ mod.rs            // 模块导出
 ```
+
+## 🏗️ 架构说明
+
+### 分层设计
+
+```rust
+// 业务逻辑层（services/friends_service.rs）
+pub struct FriendsService {
+    pub db: PgPool,
+}
+
+// Handler 层状态（handlers/state.rs）
+pub struct FriendsState {
+    pub service: FriendsService,  // 业务服务
+    pub db: PgPool,
+}
+```
+
+- **FriendsService**: 封装业务逻辑，被多个 handler 复用
+- **FriendsState**: 作为 Axum State 注入到 handler 中
 
 ## 🔗 路由映射
 

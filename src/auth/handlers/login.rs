@@ -1,9 +1,9 @@
 use crate::auth::{
-    errors::AuthError,
     models::{LoginRequest, TokenResponse},
     services::TokenService,
     utils::verify_password,
 };
+use crate::common::AppError;
 use axum::{extract::State, Json};
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -19,7 +19,7 @@ pub struct LoginState {
 pub async fn login_handler(
     State(state): State<LoginState>,
     Json(req): Json<LoginRequest>,
-) -> Result<Json<TokenResponse>, AuthError> {
+) -> Result<Json<TokenResponse>, AppError> {
     // 1. 查询用户（按ID）
     let user: Option<crate::auth::models::User> = sqlx::query_as(
         r#"SELECT * FROM "users" WHERE "user-id" = $1"#,
@@ -28,11 +28,11 @@ pub async fn login_handler(
     .fetch_optional(&state.db)
     .await?;
 
-    let user = user.ok_or(AuthError::InvalidCredentials)?;
+    let user = user.ok_or(AppError::InvalidCredentials)?;
 
     // 2. 验证密码
     if !verify_password(&req.password, &user.user_password)? {
-        return Err(AuthError::InvalidCredentials);
+        return Err(AppError::InvalidCredentials);
     }
 
     // 3. 生成 Token 对（Access Token + Refresh Token）

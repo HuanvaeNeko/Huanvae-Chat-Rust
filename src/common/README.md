@@ -1,12 +1,12 @@
 # Common 模块
 
-公共模块，提供统一的错误类型和 API 响应格式。
+公共模块，提供统一的错误类型、API 响应格式和工具函数。
 
 ## 📂 目录结构
 
 ```
 common/
-├── mod.rs          # 模块入口，导出公共类型
+├── mod.rs          # 模块入口，导出公共类型和工具函数
 ├── errors.rs       # 统一错误类型 AppError
 ├── response.rs     # 统一响应格式 ApiResponse
 └── README.md       # 本文档
@@ -17,6 +17,15 @@ common/
 1. **统一错误处理**：消除不同模块间错误类型混用的问题
 2. **统一响应格式**：所有 API 返回一致的 JSON 结构
 3. **简化 Handler 代码**：直接返回 `Result<ApiResponse<T>, AppError>`
+4. **公共工具函数**：避免不同模块间的代码重复
+
+## 📦 使用模块
+
+以下模块已统一使用 `AppError`：
+- `profile` - 用户资料模块
+- `friends` - 好友系统模块
+- `friends_messages` - 好友消息模块
+- `storage` - 文件存储模块（部分）
 
 ---
 
@@ -27,6 +36,7 @@ common/
 | 错误类型 | HTTP 状态码 | 说明 |
 |---------|------------|------|
 | `Unauthorized` | 401 | 未授权访问 |
+| `InvalidCredentials` | 401 | 用户名或密码错误 |
 | `InvalidToken` | 401 | Token 无效或已过期 |
 | `TokenRevoked` | 401 | Token 已被撤销 |
 | `Forbidden` | 403 | 权限不足 |
@@ -41,11 +51,14 @@ common/
 ### 自动转换
 
 ```rust
-// 从 AuthError 转换
-impl From<AuthError> for AppError { ... }
-
 // 从 sqlx::Error 转换
 impl From<sqlx::Error> for AppError { ... }
+
+// 从 bcrypt::BcryptError 转换
+impl From<bcrypt::BcryptError> for AppError { ... }
+
+// 从 jsonwebtoken::errors::Error 转换
+impl From<jsonwebtoken::errors::Error> for AppError { ... }
 
 // 从 anyhow::Error 转换
 impl From<anyhow::Error> for AppError { ... }
@@ -180,18 +193,19 @@ pub async fn some_service(&self) -> Result<Data, AppError> {
 }
 ```
 
-### 从 AuthError 迁移
+### Auth 模块说明
 
-由于 `AppError` 实现了 `From<AuthError>`，现有代码可以继续使用 `AuthError`，
-在需要转换为 `AppError` 的地方会自动转换：
+Auth 模块已统一使用 `AppError`，不再有独立的 `AuthError` 类型。
+所有认证相关的错误都直接使用 `AppError` 的对应变体：
 
 ```rust
-// 这两种写法都可以
-fn handler() -> Result<..., AppError> {
-    // AuthError 会自动转换为 AppError
-    some_auth_operation()?;
-    Ok(...)
-}
+// 认证相关错误示例
+AppError::Unauthorized           // 未授权访问
+AppError::InvalidCredentials     // 用户名或密码错误
+AppError::InvalidToken           // Token 无效或已过期
+AppError::TokenRevoked           // Token 已被撤销
+AppError::NotFound("设备")       // 设备不存在
+AppError::Conflict("用户已存在") // 用户已存在
 ```
 
 ---
@@ -228,4 +242,28 @@ mod tests {
     }
 }
 ```
+
+---
+
+## 🔧 公共工具函数
+
+### generate_conversation_uuid
+
+生成会话唯一标识，用于好友聊天和文件存储。
+
+```rust
+use crate::common::generate_conversation_uuid;
+
+let uuid = generate_conversation_uuid("user-456", "user-123");
+assert_eq!(uuid, "conv-user-123-user-456");
+```
+
+**功能说明：**
+- 将两个用户ID按字母顺序排序后组合
+- 确保双方使用相同的会话标识
+- 格式：`conv-{sorted_user1}-{sorted_user2}`
+
+**使用场景：**
+- `friends_messages` 模块：消息发送和查询
+- `storage` 模块：好友聊天文件存储路径生成
 

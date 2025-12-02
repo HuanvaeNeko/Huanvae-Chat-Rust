@@ -241,7 +241,7 @@ WHERE "expires-at" < $1
 
 **时间处理**: 使用 `Utc::now().naive_utc()` 传递当前时间
 
-**返回**: `Result<u64, AuthError>` - 删除的记录数
+**返回**: `Result<u64, AppError>` - 删除的记录数
 
 ---
 
@@ -289,7 +289,7 @@ WHERE "need-blacklist-check" = true
 
 **时间处理**: 使用 `Utc::now().naive_utc()` 比较过期时间
 
-**返回**: `Result<u64, AuthError>` - 更新的用户数
+**返回**: `Result<u64, AppError>` - 更新的用户数
 
 ---
 
@@ -317,12 +317,17 @@ WHERE "user-id" = $1 AND "exp" > NOW()
 **流程**:
 ```
 1. 查询 user-access-cache 获取所有未过期的 jti 和 exp
-2. 遍历每个 Token，调用 add_to_blacklist 加入黑名单
+2. 使用批量 INSERT 一次性将所有 Token 加入黑名单（避免 N+1 查询）
 3. 调用 enable_blacklist_check 启用检查窗口
 4. 返回被拉黑的 Token 数量
 ```
 
-**返回**: `Result<u64, AuthError>` - 被拉黑的 Token 数量
+**性能优化**:
+- 使用 `sqlx::QueryBuilder` 的 `push_values` 方法批量插入
+- 避免循环调用单条插入（N+1 问题）
+- 单次数据库往返完成所有写入
+
+**返回**: `Result<u64, AppError>` - 被拉黑的 Token 数量
 
 **安全性**:
 - 确保密码修改后，所有设备的旧 Token 立即失效
@@ -492,7 +497,7 @@ if need_check {
     // 只有启用时才查询黑名单
     let blacklist_service = BlacklistService::new(state.db.clone());
     if blacklist_service.is_blacklisted(&claims.jti).await? {
-        return Err(AuthError::TokenRevoked);
+        return Err(AppError::TokenRevoked);
     }
 }
 ```
@@ -778,7 +783,7 @@ DeviceService::revoke_device
 - 例如登出时的多步操作
 
 **错误处理**:
-- 统一返回 `Result<T, AuthError>`
+- 统一返回 `Result<T, AppError>`（使用 `crate::common::AppError`）
 - 详细的错误信息
 - 便于上层处理
 

@@ -7,32 +7,57 @@
 ### `message_service.rs`
 用途：消息服务的核心业务逻辑实现。
 
+**核心结构体**:
+```rust
+/// 消息服务（业务逻辑层）
+pub struct MessageService {
+    db: PgPool,
+}
+```
+
+**Handler 层状态**（在 `handlers/state.rs` 中定义）:
+```rust
+/// 消息模块 Handler 状态
+pub struct MessagesState {
+    pub service: MessageService,  // 业务服务
+    pub db: PgPool,
+}
+```
+
 包含：
 - `MessageService` - 消息服务结构体
   - `new(db: PgPool)` - 创建服务实例
-  - `generate_conversation_uuid()` - 生成会话UUID
-  - `verify_friendship()` - 验证好友关系
   - `send_message()` - 发送消息
   - `get_messages()` - 获取消息列表
   - `delete_message()` - 删除消息
   - `recall_message()` - 撤回消息
 
+依赖的公共函数：
+- `crate::common::generate_conversation_uuid` - 生成会话UUID
+- `crate::friends::services::verify_friendship` - 验证好友关系
+
 ## 🔧 核心功能
 
-### 1. 生成会话UUID
+### 1. 生成会话UUID（使用公共函数）
 ```rust
-pub fn generate_conversation_uuid(user_id_1: &str, user_id_2: &str) -> String
+use crate::common::generate_conversation_uuid;
+
+let conversation_uuid = generate_conversation_uuid(sender_id, receiver_id);
 ```
+- 使用 `common` 模块的公共函数
 - 将两个用户ID按字母顺序排序
 - 组合生成唯一的会话标识：`conv-{user1}-{user2}`
 - 保证双方使用相同的会话UUID
 
-### 2. 验证好友关系
+### 2. 验证好友关系（使用 friends 模块）
 ```rust
-pub async fn verify_friendship(&self, user_id: &str, friend_id: &str) -> Result<bool, AuthError>
+use crate::friends::services::verify_friendship;
+
+let is_friend = verify_friendship(&self.db, user_id, friend_id).await?;
 ```
-- 从 `users` 表查询 `user-owned-friends` 字段
-- 检查是否包含目标好友ID且状态为 `active`
+- 使用 `friends::services` 模块的公共函数
+- 从 `friendships` 表查询好友关系
+- 检查是否存在 `status = 'active'` 的记录
 - 返回验证结果
 
 ### 3. 发送消息
@@ -45,7 +70,7 @@ pub async fn send_message(
     message_type: &str,
     file_url: Option<String>,
     file_size: Option<i64>,
-) -> Result<(String, String), AuthError>
+) -> Result<(String, String), AppError>
 ```
 
 流程：
@@ -68,7 +93,7 @@ pub async fn get_messages(
     friend_id: &str,
     before_uuid: Option<String>,
     limit: i32,
-) -> Result<(Vec<MessageResponse>, bool), AuthError>
+) -> Result<(Vec<MessageResponse>, bool), AppError>
 ```
 
 流程：
@@ -86,7 +111,7 @@ pub async fn get_messages(
 
 ### 5. 删除消息（软删除）
 ```rust
-pub async fn delete_message(&self, user_id: &str, message_uuid: &str) -> Result<(), AuthError>
+pub async fn delete_message(&self, user_id: &str, message_uuid: &str) -> Result<(), AppError>
 ```
 
 流程：
@@ -104,7 +129,7 @@ pub async fn delete_message(&self, user_id: &str, message_uuid: &str) -> Result<
 
 ### 6. 撤回消息
 ```rust
-pub async fn recall_message(&self, user_id: &str, message_uuid: &str) -> Result<(), AuthError>
+pub async fn recall_message(&self, user_id: &str, message_uuid: &str) -> Result<(), AppError>
 ```
 
 流程：
@@ -135,10 +160,10 @@ pub async fn recall_message(&self, user_id: &str, message_uuid: &str) -> Result<
 
 ## ⚠️ 错误处理
 
-所有方法返回 `Result<T, AuthError>`：
-- `AuthError::BadRequest` - 请求参数错误或业务规则违反
-- `AuthError::Forbidden` - 权限不足
-- `AuthError::InternalServerError` - 数据库操作失败
+所有方法返回 `Result<T, AppError>`（统一错误类型）：
+- `AppError::BadRequest` - 请求参数错误或业务规则违反
+- `AppError::Forbidden` - 权限不足
+- `AppError::Internal` - 数据库操作失败
 
 ## 📈 性能优化
 

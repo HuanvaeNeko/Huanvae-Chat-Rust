@@ -7,19 +7,19 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 // 导入模块
 use huanvae_chat::app_state::AppState;
 use huanvae_chat::auth::{handlers::create_auth_routes, utils::KeyManager};
+use huanvae_chat::config::get_config;
 use huanvae_chat::friends::handlers::create_friend_routes;
 use huanvae_chat::friends_messages::handlers::create_messages_routes;
 use huanvae_chat::profile::handlers::routes::profile_routes;
-use huanvae_chat::storage::{create_storage_routes, S3Client, S3Config};
+use huanvae_chat::storage::{create_storage_routes, S3Client};
 
-/// 配置CORS中间件（从环境变量读取）
+/// 配置CORS中间件（从统一配置读取）
 fn configure_cors() -> tower_http::cors::CorsLayer {
     use tower_http::cors::{CorsLayer, AllowOrigin};
     use axum::http::{Method, HeaderValue, header};
 
-    // 读取允许的来源（多个来源用逗号分隔）
-    let allowed_origins_str = std::env::var("CORS_ALLOWED_ORIGINS")
-        .unwrap_or_else(|_| "*".to_string());
+    let cors_config = &get_config().cors;
+    let allowed_origins_str = &cors_config.allowed_origins;
 
     tracing::info!("🔐 CORS配置: allowed_origins={}", allowed_origins_str);
 
@@ -85,7 +85,7 @@ fn configure_cors() -> tower_http::cors::CorsLayer {
                 header::ACCEPT,
             ])
             .allow_credentials(true)
-            .max_age(Duration::from_secs(3600))
+            .max_age(Duration::from_secs(cors_config.max_age_secs))
     };
 
     cors
@@ -107,109 +107,70 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("🚀 HuanVae Chat 启动中...");
 
-    // 3. 连接数据库（从环境变量读取连接池配置）
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost:5432/huanvae_chat".to_string());
+    // 3. 获取全局配置
+    let config = get_config();
 
-    // 连接池配置（从环境变量读取，提供合理默认值）
-    let max_connections = std::env::var("DB_MAX_CONNECTIONS")
-        .ok()
-        .and_then(|s| s.parse::<u32>().ok())
-        .unwrap_or(20);
-    
-    let min_connections = std::env::var("DB_MIN_CONNECTIONS")
-        .ok()
-        .and_then(|s| s.parse::<u32>().ok())
-        .unwrap_or(5);
-    
-    let acquire_timeout = std::env::var("DB_ACQUIRE_TIMEOUT")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(30);
-    
-    let idle_timeout = std::env::var("DB_IDLE_TIMEOUT")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(600);
-    
-    let max_lifetime = std::env::var("DB_MAX_LIFETIME")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(1800);
-
+    // 4. 连接数据库（从统一配置读取连接池配置）
+    let db_config = &config.database;
     tracing::info!("📊 数据库连接池配置: max={}, min={}, acquire_timeout={}s, idle_timeout={}s, max_lifetime={}s",
-        max_connections, min_connections, acquire_timeout, idle_timeout, max_lifetime);
+        db_config.max_connections, db_config.min_connections, 
+        db_config.acquire_timeout_secs, db_config.idle_timeout_secs, db_config.max_lifetime_secs);
 
     let db = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(max_connections)
-        .min_connections(min_connections)
-        .acquire_timeout(Duration::from_secs(acquire_timeout))
-        .idle_timeout(Duration::from_secs(idle_timeout))
-        .max_lifetime(Duration::from_secs(max_lifetime))
-        .connect(&database_url)
+        .max_connections(db_config.max_connections)
+        .min_connections(db_config.min_connections)
+        .acquire_timeout(Duration::from_secs(db_config.acquire_timeout_secs))
+        .idle_timeout(Duration::from_secs(db_config.idle_timeout_secs))
+        .max_lifetime(Duration::from_secs(db_config.max_lifetime_secs))
+        .connect(&db_config.url)
         .await?;
     tracing::info!("✅ 数据库连接成功");
 
-    // 4a. 初始化 MinIO/S3 客户端
-    let s3_config = S3Config::from_env().expect("Failed to load MinIO configuration");
+    // 5. 初始化 MinIO/S3 客户端（从全局配置获取）
+    let minio_config = config.minio.clone();
     let s3_client = Arc::new(
-        S3Client::new(s3_config)
+        S3Client::new(minio_config)
             .await
             .expect("Failed to initialize S3 client"),
     );
     tracing::info!("✅ MinIO 客户端初始化成功");
 
-    // 4. 加载或生成 RSA 密钥对
-    let private_key_path = std::env::var("JWT_PRIVATE_KEY_PATH")
-        .unwrap_or_else(|_| "./keys/private_key.pem".to_string());
-    let public_key_path = std::env::var("JWT_PUBLIC_KEY_PATH")
-        .unwrap_or_else(|_| "./keys/public_key.pem".to_string());
+    // 6. 加载或生成 RSA 密钥对（从统一配置读取路径）
+    let jwt_config = &config.jwt;
+    let key_manager = KeyManager::load_or_generate(&jwt_config.private_key_path, &jwt_config.public_key_path)?;
 
-    let key_manager = KeyManager::load_or_generate(&private_key_path, &public_key_path)?;
+    // 获取API基础URL（从统一配置读取）
+    let api_base_url = config.api_base_url.clone();
 
-    // 获取API基础URL
-    let api_base_url = std::env::var("APP_BASE_URL")
-        .unwrap_or_else(|_| "http://localhost:8080".to_string());
-
-    // 5. 创建统一应用状态（合并所有服务实例）
+    // 7. 创建统一应用状态（合并所有服务实例）
     let app_state = AppState::new(db.clone(), key_manager, s3_client.clone(), api_base_url.clone());
     tracing::info!("✅ 应用状态初始化成功");
 
-    // 6. 启动后台定时清理任务
+    // 8. 启动后台定时清理任务（从统一配置读取间隔）
     {
         let blacklist_service = app_state.blacklist_service.clone();
+        let cleanup_config = &config.cleanup;
+        
+        tracing::info!("🧹 定时清理任务已启动:");
+        tracing::info!("   - token-blacklist 清理间隔: {}秒", cleanup_config.token_cleanup_interval_secs);
+        tracing::info!("   - user-access-cache 清理间隔: {}秒", cleanup_config.cache_cleanup_interval_secs);
+        tracing::info!("   - need-blacklist-check 清理间隔: {}秒", cleanup_config.check_cleanup_interval_secs);
+
+        let token_interval_secs = cleanup_config.token_cleanup_interval_secs;
+        let cache_interval_secs = cleanup_config.cache_cleanup_interval_secs;
+        let check_interval_secs = cleanup_config.check_cleanup_interval_secs;
+
         tokio::spawn(async move {
-            // 清理间隔配置（秒）
-            let token_cleanup_interval = std::env::var("TOKEN_CLEANUP_INTERVAL_SECONDS")
-                .ok()
-                .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(3600); // 默认每小时
-            
-            let cache_cleanup_interval = std::env::var("CACHE_CLEANUP_INTERVAL_SECONDS")
-                .ok()
-                .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(300); // 默认每5分钟
-            
-            let check_cleanup_interval = std::env::var("CHECK_CLEANUP_INTERVAL_SECONDS")
-                .ok()
-                .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(60); // 默认每分钟
-
-            tracing::info!("🧹 定时清理任务已启动:");
-            tracing::info!("   - token-blacklist 清理间隔: {}秒", token_cleanup_interval);
-            tracing::info!("   - user-access-cache 清理间隔: {}秒", cache_cleanup_interval);
-            tracing::info!("   - need-blacklist-check 清理间隔: {}秒", check_cleanup_interval);
-
-            let mut token_interval = tokio::time::interval(Duration::from_secs(token_cleanup_interval));
-            let mut cache_interval = tokio::time::interval(Duration::from_secs(cache_cleanup_interval));
-            let mut check_interval = tokio::time::interval(Duration::from_secs(check_cleanup_interval));
+            let mut token_interval = tokio::time::interval(Duration::from_secs(token_interval_secs));
+            let mut cache_interval = tokio::time::interval(Duration::from_secs(cache_interval_secs));
+            let mut check_interval = tokio::time::interval(Duration::from_secs(check_interval_secs));
 
             loop {
                 tokio::select! {
                     _ = token_interval.tick() => {
                         match blacklist_service.cleanup_expired_tokens().await {
-                            Ok(count) if count > 0 => {
-                                tracing::info!("🧹 已清理 {} 条过期的 token-blacklist 记录", count);
+                            Ok((total, deleted, remaining)) if deleted > 0 => {
+                                tracing::info!("🧹 token-blacklist: 总计 {} 条, 清理 {} 条, 剩余 {} 条", total, deleted, remaining);
                             }
                             Err(e) => {
                                 tracing::warn!("清理 token-blacklist 失败: {}", e);
@@ -219,8 +180,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     _ = cache_interval.tick() => {
                         match blacklist_service.cleanup_expired_access_cache().await {
-                            Ok(count) if count > 0 => {
-                                tracing::info!("🧹 已清理 {} 条过期的 user-access-cache 记录", count);
+                            Ok((total, deleted, remaining)) if deleted > 0 => {
+                                tracing::info!("🧹 user-access-cache: 总计 {} 条, 清理 {} 条, 剩余 {} 条", total, deleted, remaining);
                             }
                             Err(e) => {
                                 tracing::warn!("清理 user-access-cache 失败: {}", e);
@@ -230,8 +191,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     _ = check_interval.tick() => {
                         match blacklist_service.cleanup_expired_checks().await {
-                            Ok(count) if count > 0 => {
-                                tracing::info!("🧹 已重置 {} 个用户的 need-blacklist-check 标志", count);
+                            Ok((total, reset, remaining)) if reset > 0 => {
+                                tracing::info!("🧹 need-blacklist-check: 总计 {} 个, 重置 {} 个, 剩余 {} 个", total, reset, remaining);
                             }
                             Err(e) => {
                                 tracing::warn!("清理 need-blacklist-check 失败: {}", e);
@@ -244,7 +205,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
-    // 7. 创建路由（使用 AppState 生成各模块所需的 State）
+    // 9. 创建路由（使用 AppState 生成各模块所需的 State）
     let app = Router::new()
         // 健康检查
         .route("/health", get(|| async { "OK" }))
@@ -300,11 +261,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 日志中间件
         .layer(tower_http::trace::TraceLayer::new_for_http());
 
-    // 8. 启动服务器
-    let port = std::env::var("APP_PORT")
-        .unwrap_or_else(|_| "8080".to_string())
-        .parse::<u16>()?;
-
+    // 10. 启动服务器（从统一配置读取端口）
+    let port = config.server.port;
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
 
     tracing::info!("🌐 服务器监听中: http://0.0.0.0:{}", port);
@@ -331,7 +289,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("  POST /api/messages/recall          - 撤回消息");
     tracing::info!("  POST /api/storage/upload/request   - 请求文件上传");
     tracing::info!("  POST /api/storage/upload/direct    - 直接上传文件");
-    tracing::info!("  GET  /api/storage/multipart/part-url - 获取分片URL");
+    tracing::info!("  GET  /api/storage/multipart/part_url - 获取分片URL");
     tracing::info!("  GET  /api/storage/files             - 查询个人文件列表");
 
     axum::serve(listener, app).await?;

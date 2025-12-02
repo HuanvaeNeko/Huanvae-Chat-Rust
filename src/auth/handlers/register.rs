@@ -1,9 +1,9 @@
 use crate::auth::{
-    errors::AuthError,
     models::{RegisterRequest, UserResponse},
     services::TokenService,
     utils::{hash_password, validate_email, validate_nickname, validate_password_strength},
 };
+use crate::common::AppError;
 use axum::{extract::State, Json};
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -19,7 +19,7 @@ pub struct RegisterState {
 pub async fn register_handler(
     State(state): State<RegisterState>,
     Json(req): Json<RegisterRequest>,
-) -> Result<Json<UserResponse>, AuthError> {
+) -> Result<Json<UserResponse>, AppError> {
     // 1. 验证输入
     if let Some(email) = &req.email {
         validate_email(email)?;
@@ -36,7 +36,7 @@ pub async fn register_handler(
     .await?;
 
     if existing_id.is_some() {
-        return Err(AuthError::BadRequest("用户ID已存在".to_string()));
+        return Err(AppError::BadRequest("用户ID已存在".to_string()));
     }
 
     // 3. 检查邮箱是否已存在（如果提供）
@@ -49,7 +49,7 @@ pub async fn register_handler(
         .await?;
 
         if existing_user.is_some() {
-            return Err(AuthError::UserAlreadyExists);
+            return Err(AppError::Conflict("用户已存在".to_string()));
         }
     }
 

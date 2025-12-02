@@ -8,7 +8,7 @@ use crate::auth::{
     services::{BlacklistService, DeviceService, TokenService},
     utils::KeyManager,
 };
-use crate::friends::services::FriendsState;
+use crate::friends::handlers::FriendsState;
 use crate::friends_messages::handlers::MessagesState;
 use crate::profile::handlers::routes::ProfileAppState;
 use crate::storage::S3Client;
@@ -123,6 +123,7 @@ impl AppState {
     pub fn friends_state(&self) -> FriendsState {
         FriendsState::new(self.db.clone())
     }
+
 
     /// 获取消息模块状态
     pub fn messages_state(&self) -> MessagesState {

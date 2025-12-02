@@ -4,49 +4,49 @@
 -- ========================================
 
 -- ========================================
--- file_records 表复合索引
+-- file-records 表复合索引
 -- ========================================
 
 -- 按用户+状态查询文件（用户文件列表）
-CREATE INDEX IF NOT EXISTS idx_file_records_owner_status 
-ON file_records(owner_id, status);
+CREATE INDEX IF NOT EXISTS "idx-file-records-owner-status" 
+ON "file-records"("owner-id", "status");
 
 -- 按存储位置+状态查询（按类型统计）
-CREATE INDEX IF NOT EXISTS idx_file_records_location_status 
-ON file_records(storage_location, status);
+CREATE INDEX IF NOT EXISTS "idx-file-records-location-status" 
+ON "file-records"("storage-location", "status");
 
 -- 按哈希+状态查询（秒传检查，仅索引已完成文件）
-CREATE INDEX IF NOT EXISTS idx_file_records_hash_status 
-ON file_records(file_hash, status) WHERE status = 'completed';
+CREATE INDEX IF NOT EXISTS "idx-file-records-hash-status" 
+ON "file-records"("file-hash", "status") WHERE "status" = 'completed';
 
 -- 按用户+存储位置+状态复合索引（用户按类型查询文件）
-CREATE INDEX IF NOT EXISTS idx_file_records_owner_location_status 
-ON file_records(owner_id, storage_location, status);
+CREATE INDEX IF NOT EXISTS "idx-file-records-owner-location-status" 
+ON "file-records"("owner-id", "storage-location", "status");
 
 -- ========================================
 -- friend-messages 表复合索引
 -- ========================================
 
 -- 会话+时间复合索引（主查询：获取会话消息）
-CREATE INDEX IF NOT EXISTS "idx_messages_conversation_time" 
+CREATE INDEX IF NOT EXISTS "idx-messages-conversation-time" 
 ON "friend-messages"("conversation-uuid", "send-time" DESC);
 
 -- 发送者+删除状态（发送者视角查询，仅索引未删除消息）
-CREATE INDEX IF NOT EXISTS "idx_messages_sender_deleted" 
+CREATE INDEX IF NOT EXISTS "idx-messages-sender-deleted" 
 ON "friend-messages"("sender-id", "is-deleted-by-sender") 
 WHERE "is-deleted-by-sender" = false;
 
 -- 接收者+删除状态（接收者视角查询，仅索引未删除消息）
-CREATE INDEX IF NOT EXISTS "idx_messages_receiver_deleted" 
+CREATE INDEX IF NOT EXISTS "idx-messages-receiver-deleted" 
 ON "friend-messages"("receiver-id", "is-deleted-by-receiver") 
 WHERE "is-deleted-by-receiver" = false;
 
 -- 会话+发送者+删除状态复合索引（优化软删除查询）
-CREATE INDEX IF NOT EXISTS "idx_messages_conv_sender_deleted"
+CREATE INDEX IF NOT EXISTS "idx-messages-conv-sender-deleted"
 ON "friend-messages"("conversation-uuid", "sender-id", "is-deleted-by-sender");
 
 -- 会话+接收者+删除状态复合索引
-CREATE INDEX IF NOT EXISTS "idx_messages_conv_receiver_deleted"
+CREATE INDEX IF NOT EXISTS "idx-messages-conv-receiver-deleted"
 ON "friend-messages"("conversation-uuid", "receiver-id", "is-deleted-by-receiver");
 
 -- ========================================
@@ -54,33 +54,33 @@ ON "friend-messages"("conversation-uuid", "receiver-id", "is-deleted-by-receiver
 -- ========================================
 
 -- 用户+类型复合索引（按用户查询特定类型的黑名单 Token）
-CREATE INDEX IF NOT EXISTS "idx_blacklist_user_type" 
+CREATE INDEX IF NOT EXISTS "idx-blacklist-user-type" 
 ON "token-blacklist"("user-id", "token-type");
 
 -- 用户+过期时间复合索引（清理用户黑名单时使用）
-CREATE INDEX IF NOT EXISTS "idx_blacklist_user_expires"
+CREATE INDEX IF NOT EXISTS "idx-blacklist-user-expires"
 ON "token-blacklist"("user-id", "expires-at");
 
 -- ========================================
--- file_access_permissions 表复合索引
+-- file-access-permissions 表复合索引
 -- ========================================
 
 -- 用户+访问类型复合索引（查询用户有权访问的文件）
-CREATE INDEX IF NOT EXISTS idx_file_access_user_type 
-ON file_access_permissions(user_id, access_type) 
-WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS "idx-file-access-user-type" 
+ON "file-access-permissions"("user-id", "access-type") 
+WHERE "revoked-at" IS NULL;
 
 -- 文件UUID+用户复合索引（验证用户对文件的访问权限）
-CREATE INDEX IF NOT EXISTS idx_file_access_uuid_user
-ON file_access_permissions(file_uuid, user_id)
-WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS "idx-file-access-uuid-user"
+ON "file-access-permissions"("file-uuid", "user-id")
+WHERE "revoked-at" IS NULL;
 
 -- ========================================
 -- user-access-cache 表复合索引
 -- ========================================
 
 -- 用户+过期时间复合索引（批量拉黑时使用）
-CREATE INDEX IF NOT EXISTS "idx_access_cache_user_exp"
+CREATE INDEX IF NOT EXISTS "idx-access-cache-user-exp"
 ON "user-access-cache"("user-id", "exp")
 WHERE "exp" > NOW();
 
@@ -89,9 +89,9 @@ WHERE "exp" > NOW();
 -- ========================================
 
 -- 用户+好友+状态复合索引（验证好友关系）
-CREATE INDEX IF NOT EXISTS idx_friendships_user_friend_status
-ON friendships(user_id, friend_id, status)
-WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS "idx-friendships-user-friend-status"
+ON "friendships"("user-id", "friend-id", "status")
+WHERE "status" = 'active';
 
 -- ========================================
 -- 显示创建信息
@@ -102,32 +102,31 @@ WHERE status = 'active';
 \echo '';
 \echo '新增索引:';
 \echo '';
-\echo '  file_records 表:';
-\echo '    - idx_file_records_owner_status';
-\echo '    - idx_file_records_location_status';
-\echo '    - idx_file_records_hash_status (部分索引)';
-\echo '    - idx_file_records_owner_location_status';
+\echo '  file-records 表:';
+\echo '    - idx-file-records-owner-status';
+\echo '    - idx-file-records-location-status';
+\echo '    - idx-file-records-hash-status (部分索引)';
+\echo '    - idx-file-records-owner-location-status';
 \echo '';
 \echo '  friend-messages 表:';
-\echo '    - idx_messages_conversation_time';
-\echo '    - idx_messages_sender_deleted (部分索引)';
-\echo '    - idx_messages_receiver_deleted (部分索引)';
-\echo '    - idx_messages_conv_sender_deleted';
-\echo '    - idx_messages_conv_receiver_deleted';
+\echo '    - idx-messages-conversation-time';
+\echo '    - idx-messages-sender-deleted (部分索引)';
+\echo '    - idx-messages-receiver-deleted (部分索引)';
+\echo '    - idx-messages-conv-sender-deleted';
+\echo '    - idx-messages-conv-receiver-deleted';
 \echo '';
 \echo '  token-blacklist 表:';
-\echo '    - idx_blacklist_user_type';
-\echo '    - idx_blacklist_user_expires';
+\echo '    - idx-blacklist-user-type';
+\echo '    - idx-blacklist-user-expires';
 \echo '';
-\echo '  file_access_permissions 表:';
-\echo '    - idx_file_access_user_type (部分索引)';
-\echo '    - idx_file_access_uuid_user (部分索引)';
+\echo '  file-access-permissions 表:';
+\echo '    - idx-file-access-user-type (部分索引)';
+\echo '    - idx-file-access-uuid-user (部分索引)';
 \echo '';
 \echo '  user-access-cache 表:';
-\echo '    - idx_access_cache_user_exp (部分索引)';
+\echo '    - idx-access-cache-user-exp (部分索引)';
 \echo '';
 \echo '  friendships 表:';
-\echo '    - idx_friendships_user_friend_status (部分索引)';
+\echo '    - idx-friendships-user-friend-status (部分索引)';
 \echo '';
 \echo '========================================';
-
