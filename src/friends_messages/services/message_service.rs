@@ -1,4 +1,5 @@
 use crate::auth::errors::AuthError;
+use crate::config::message_config;
 use crate::friends_messages::models::{Message, MessageResponse};
 use chrono::Utc;
 use sqlx::PgPool;
@@ -226,11 +227,16 @@ impl MessageService {
             return Err(AuthError::Forbidden);
         }
 
-        // 3. 检查是否超过2分钟
+        // 3. 检查是否超过撤回时间窗口（使用配置的撤回时限）
         let now = Utc::now();
         let duration = now.signed_duration_since(send_time);
-        if duration.num_minutes() > 2 {
-            return Err(AuthError::BadRequest("消息发送超过2分钟，无法撤回".to_string()));
+        let config = message_config();
+        if duration.num_seconds() > config.recall_window as i64 {
+            let window_minutes = config.recall_window / 60;
+            return Err(AuthError::BadRequest(format!(
+                "消息发送超过{}分钟，无法撤回",
+                window_minutes
+            )));
         }
 
         // 4. 标记双方都已删除（撤回）

@@ -4,23 +4,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-// 导入认证模块
-use huanvae_chat::auth::{
-    handlers::{
-        create_auth_routes, DeviceState, LoginState, LogoutState, RefreshTokenState,
-        RegisterState,
-    },
-    middleware::AuthState,
-    services::{BlacklistService, DeviceService, TokenService},
-    utils::KeyManager,
-};
-use huanvae_chat::friends::{
-    handlers::create_friend_routes,
-    services::FriendsState,
-};
-use huanvae_chat::friends_messages::{
-    handlers::{create_messages_routes, MessagesState},
-};
+// 导入模块
+use huanvae_chat::app_state::AppState;
+use huanvae_chat::auth::{handlers::create_auth_routes, utils::KeyManager};
+use huanvae_chat::friends::handlers::create_friend_routes;
+use huanvae_chat::friends_messages::handlers::create_messages_routes;
 use huanvae_chat::profile::handlers::routes::profile_routes;
 use huanvae_chat::storage::{create_storage_routes, S3Client, S3Config};
 
@@ -179,50 +167,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let key_manager = KeyManager::load_or_generate(&private_key_path, &public_key_path)?;
 
-    // 5. 创建服务实例
-    let token_service = Arc::new(TokenService::new(key_manager, db.clone()));
-    let blacklist_service = Arc::new(BlacklistService::new(db.clone()));
-    let device_service = Arc::new(DeviceService::new(db.clone()));
-
-    // 6. 创建状态实例
-    let register_state = RegisterState {
-        db: db.clone(),
-        token_service: token_service.clone(),
-    };
-
-    let login_state = LoginState {
-        db: db.clone(),
-        token_service: token_service.clone(),
-    };
-
-    let refresh_state = RefreshTokenState {
-        token_service: token_service.clone(),
-    };
-
-    let logout_state = LogoutState {
-        token_service: token_service.clone(),
-        blacklist_service: blacklist_service.clone(),
-    };
-
-    let device_state = DeviceState {
-        device_service: device_service.clone(),
-        blacklist_service: blacklist_service.clone(),
-    };
-
-    let auth_state = AuthState {
-        token_service: token_service.clone(),
-        blacklist_service: blacklist_service.clone(),
-        db: db.clone(),
-    };
-
-    let friends_state = FriendsState::new(db.clone());
-    let messages_state = MessagesState::new(db.clone());
-
     // 获取API基础URL
     let api_base_url = std::env::var("APP_BASE_URL")
         .unwrap_or_else(|_| "http://localhost:8080".to_string());
 
-    // 7. 创建路由
+    // 5. 创建统一应用状态（合并所有服务实例）
+    let app_state = AppState::new(db.clone(), key_manager, s3_client.clone(), api_base_url.clone());
+    tracing::info!("✅ 应用状态初始化成功");
+
+    // 6. 创建路由（使用 AppState 生成各模块所需的 State）
     let app = Router::new()
         // 健康检查
         .route("/health", get(|| async { "OK" }))
@@ -234,33 +187,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nest(
             "/api/auth",
             create_auth_routes(
-                register_state,
-                login_state,
-                refresh_state,
-                logout_state,
-                device_state,
-                auth_state.clone(),
+                app_state.register_state(),
+                app_state.login_state(),
+                app_state.refresh_state(),
+                app_state.logout_state(),
+                app_state.device_state(),
+                app_state.auth_state(),
             ),
         )
+        // 好友路由
         .nest(
             "/api/friends",
             create_friend_routes(
-                friends_state,
-                auth_state.clone(),
-                db.clone(),
+                app_state.friends_state(),
+                app_state.auth_state(),
+                app_state.db.clone(),
             ),
         )
         // 好友消息路由
         .nest(
             "/api/messages",
-            create_messages_routes(messages_state, auth_state.clone()),
+            create_messages_routes(app_state.messages_state(), app_state.auth_state()),
         )
         // 个人资料路由
-        .merge(profile_routes(db.clone(), s3_client.clone(), auth_state.clone()))
+        .merge(profile_routes(
+            app_state.db.clone(),
+            app_state.s3_client.clone(),
+            app_state.auth_state(),
+            app_state.blacklist_service.clone(),
+        ))
         // 文件存储路由
         .nest(
             "/api/storage",
-            create_storage_routes(db.clone(), s3_client.clone(), auth_state.clone(), api_base_url),
+            create_storage_routes(
+                app_state.db.clone(),
+                app_state.s3_client.clone(),
+                app_state.auth_state(),
+                api_base_url,
+            ),
         )
         // CORS 中间件（从环境变量读取配置）
         .layer(configure_cors())

@@ -293,6 +293,43 @@ WHERE "need-blacklist-check" = true
 
 ---
 
+#### 6. **批量拉黑用户所有 Access Token** (`blacklist_all_user_access_tokens`)
+**功能**:
+- 从 `user-access-cache` 读取用户所有未过期的 Access Token
+- 将它们全部加入黑名单
+- 自动启用黑名单检查
+
+**参数**:
+- `user_id`: 用户ID
+- `reason`: 拉黑原因（如 "密码已修改"）
+
+**查询（获取未过期 Token）**:
+```sql
+SELECT "jti", "exp"
+FROM "user-access-cache"
+WHERE "user-id" = $1 AND "exp" > NOW()
+```
+
+**调用时机**:
+- 用户修改密码后（`update_password` handler）
+- 确保所有旧 Access Token 立即失效
+
+**流程**:
+```
+1. 查询 user-access-cache 获取所有未过期的 jti 和 exp
+2. 遍历每个 Token，调用 add_to_blacklist 加入黑名单
+3. 调用 enable_blacklist_check 启用检查窗口
+4. 返回被拉黑的 Token 数量
+```
+
+**返回**: `Result<u64, AuthError>` - 被拉黑的 Token 数量
+
+**安全性**:
+- 确保密码修改后，所有设备的旧 Token 立即失效
+- 用户需要在所有设备重新登录
+
+---
+
 **结构体**:
 ```rust
 pub struct BlacklistService {

@@ -1,4 +1,5 @@
 use crate::auth::utils::password::hash_password;
+use crate::common::AppError;
 use crate::profile::models::{ProfileResponse, UpdatePasswordRequest, UpdateProfileRequest};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use sqlx::PgPool;
@@ -19,7 +20,7 @@ impl ProfileService {
     pub async fn get_profile(
         &self,
         user_id: &str,
-    ) -> Result<ProfileResponse, anyhow::Error> {
+    ) -> Result<ProfileResponse, AppError> {
         let pool = &self.db;
         let record: (String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<NaiveDateTime>, Option<NaiveDateTime>) = sqlx::query_as(
             r#"
@@ -41,7 +42,7 @@ impl ProfileService {
         .await
         .map_err(|e| {
             error!("Failed to fetch user profile: {}", e);
-            anyhow::anyhow!("User not found")
+            AppError::NotFound("用户".to_string())
         })?;
 
         Ok(ProfileResponse {
@@ -61,7 +62,7 @@ impl ProfileService {
         &self,
         user_id: &str,
         request: UpdateProfileRequest,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), AppError> {
         let pool = &self.db;
         // 动态构建更新语句
         let mut updates = Vec::new();
@@ -78,7 +79,7 @@ impl ProfileService {
         }
 
         if updates.is_empty() {
-            return Err(anyhow::anyhow!("No fields to update"));
+            return Err(AppError::BadRequest("没有需要更新的字段".to_string()));
         }
 
         let update_clause = updates.join(", ");
@@ -101,7 +102,7 @@ impl ProfileService {
 
         query.execute(pool).await.map_err(|e| {
             error!("Failed to update user profile: {}", e);
-            anyhow::anyhow!("Failed to update profile")
+            AppError::Database(e.to_string())
         })?;
 
         info!("User profile updated: {}", user_id);
@@ -113,7 +114,7 @@ impl ProfileService {
         &self,
         user_id: &str,
         request: UpdatePasswordRequest,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), AppError> {
         let pool = &self.db;
         // 获取当前密码哈希
         let (current_hash,): (Option<String>,) = sqlx::query_as(
@@ -124,18 +125,21 @@ impl ProfileService {
         .await
         .map_err(|e| {
             error!("Failed to fetch user: {}", e);
-            anyhow::anyhow!("User not found")
+            AppError::NotFound("用户".to_string())
         })?;
 
         let current_hash = current_hash.unwrap_or_default();
 
         // 验证旧密码
         if !bcrypt::verify(&request.old_password, &current_hash).unwrap_or(false) {
-            return Err(anyhow::anyhow!("Old password is incorrect"));
+            return Err(AppError::BadRequest("旧密码不正确".to_string()));
         }
 
         // 哈希新密码
-        let new_hash = hash_password(&request.new_password)?;
+        let new_hash = hash_password(&request.new_password).map_err(|e| {
+            error!("Failed to hash password: {}", e);
+            AppError::Internal
+        })?;
 
         // 更新密码
         sqlx::query(
@@ -147,7 +151,7 @@ impl ProfileService {
         .await
         .map_err(|e| {
             error!("Failed to update password: {}", e);
-            anyhow::anyhow!("Failed to update password")
+            AppError::Database(e.to_string())
         })?;
 
         info!("Password updated for user: {}", user_id);
@@ -159,7 +163,7 @@ impl ProfileService {
         &self,
         user_id: &str,
         avatar_url: &str,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), AppError> {
         let pool = &self.db;
         sqlx::query(
             r#"UPDATE "users" SET "user-avatar-url" = $1 WHERE "user-id" = $2"#
@@ -170,7 +174,7 @@ impl ProfileService {
         .await
         .map_err(|e| {
             error!("Failed to update avatar URL: {}", e);
-            anyhow::anyhow!("Failed to update avatar")
+            AppError::Database(e.to_string())
         })?;
 
         info!("Avatar URL updated for user: {}", user_id);

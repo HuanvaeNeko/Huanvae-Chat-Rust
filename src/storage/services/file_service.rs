@@ -400,7 +400,7 @@ impl FileService {
             .await?;
         
         // 生成UUID访问URL
-        let uuid_file_url = format!("http://localhost:8080/api/storage/file/{}", file_uuid);
+        let uuid_file_url = format!("{}/api/storage/file/{}", self.api_base_url, file_uuid);
         
         // 更新file_records
         let result = sqlx::query(

@@ -3,6 +3,7 @@ use crate::auth::{
     models::{AccessTokenClaims, CreateRefreshToken, RefreshTokenClaims, TokenResponse},
     utils::{generate_device_id, generate_jti, KeyManager},
 };
+use crate::config::token_config;
 use chrono::{Duration, Utc};
 use tokio::time::sleep;
 use std::time::Duration as StdDuration;
@@ -42,11 +43,12 @@ impl TokenService {
             mac_address.as_deref().unwrap_or("Unknown"),
         ).await?;
 
-        // 生成 Refresh Token (7天)
+        // 生成 Refresh Token（使用配置的有效期）
         let refresh_token = self.generate_refresh_token(user_id, &device_id, &token_id)?;
 
-        // 保存 Refresh Token 到数据库
-        let expires_at = (now + Duration::days(7)).naive_utc();
+        // 保存 Refresh Token 到数据库（使用配置的有效期）
+        let config = token_config();
+        let expires_at = (now + Duration::seconds(config.refresh_token_ttl as i64)).naive_utc();
         let create_token = CreateRefreshToken {
             token_id,
             user_id: user_id.to_string(),
@@ -63,7 +65,7 @@ impl TokenService {
             access_token,
             refresh_token,
             token_type: "Bearer".to_string(),
-            expires_in: 900, // 15分钟
+            expires_in: config.access_token_ttl as i64,
         })
     }
 
@@ -76,7 +78,8 @@ impl TokenService {
         mac_address: &str,
     ) -> Result<String, AuthError> {
         let now = Utc::now();
-        let expires_at = now + Duration::minutes(15);
+        let config = token_config();
+        let expires_at = now + Duration::seconds(config.access_token_ttl as i64);
 
         let claims = AccessTokenClaims {
             sub: user_id.to_string(),
@@ -131,7 +134,7 @@ impl TokenService {
         Ok(())
     }
 
-    /// 生成 Refresh Token (7天)
+    /// 生成 Refresh Token（使用配置的有效期）
     fn generate_refresh_token(
         &self,
         user_id: &str,
@@ -139,7 +142,8 @@ impl TokenService {
         token_id: &str,
     ) -> Result<String, AuthError> {
         let now = Utc::now();
-        let expires_at = now + Duration::days(7);
+        let config = token_config();
+        let expires_at = now + Duration::seconds(config.refresh_token_ttl as i64);
 
         let claims = RefreshTokenClaims {
             sub: user_id.to_string(),
