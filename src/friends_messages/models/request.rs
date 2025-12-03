@@ -13,7 +13,8 @@ pub struct SendMessageRequest {
     #[validate(length(min = 1))]
     pub message_type: String,  // text/image/video/file
     
-    pub file_url: Option<String>,
+    pub file_uuid: Option<String>,  // 文件UUID（优先使用）
+    pub file_url: Option<String>,   // 文件URL（兼容保留）
     pub file_size: Option<i64>,
 }
 

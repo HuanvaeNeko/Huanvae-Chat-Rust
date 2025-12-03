@@ -10,6 +10,7 @@ use std::sync::Arc;
 use tracing::{error, info};
 
 use crate::auth::middleware::AuthContext;
+use crate::friends::services::verify_friendship;
 use crate::storage::client::S3Client;
 use crate::storage::models::*;
 use crate::storage::services::FileService;
@@ -17,14 +18,16 @@ use crate::storage::services::FileService;
 /// Storage状态
 #[derive(Clone)]
 pub struct StorageState {
+    pub db: PgPool,
     pub file_service: Arc<FileService>,
     pub s3_client: Arc<S3Client>,
 }
 
 impl StorageState {
     pub fn new(db: PgPool, s3_client: Arc<S3Client>, api_base_url: String) -> Self {
-        let file_service = Arc::new(FileService::new(db, s3_client.clone(), api_base_url));
+        let file_service = Arc::new(FileService::new(db.clone(), s3_client.clone(), api_base_url));
         Self {
+            db,
             file_service,
             s3_client,
         }
@@ -38,6 +41,34 @@ pub async fn request_upload(
     Json(request): Json<FileUploadRequest>,
 ) -> Result<Json<FileUploadResponse>, (StatusCode, Json<Value>)> {
     info!("用户 {} 请求上传文件: {}", auth_ctx.user_id, request.filename);
+
+    // 好友文件上传：验证好友关系
+    if request.storage_location == StorageLocation::FriendMessages {
+        let friend_id = request.related_id.as_ref().ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "好友ID不能为空" })),
+            )
+        })?;
+
+        match verify_friendship(&state.db, &auth_ctx.user_id, friend_id).await {
+            Ok(is_friend) => {
+                if !is_friend {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({ "error": "不是好友关系，无法上传文件" })),
+                    ));
+                }
+            }
+            Err(e) => {
+                error!("验证好友关系失败: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "验证好友关系失败" })),
+                ));
+            }
+        }
+    }
 
     match state.file_service
         .request_upload(&auth_ctx.user_id.to_string(), request)

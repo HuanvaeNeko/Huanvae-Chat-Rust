@@ -36,6 +36,7 @@ pub async fn send_message_handler(
             &req.receiver_id,
             &req.message_content,
             &req.message_type,
+            req.file_uuid,
             req.file_url,
             req.file_size,
         )

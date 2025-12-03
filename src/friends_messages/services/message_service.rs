@@ -24,6 +24,7 @@ impl MessageService {
         receiver_id: &str,
         message_content: &str,
         message_type: &str,
+        file_uuid: Option<String>,
         file_url: Option<String>,
         file_size: Option<i64>,
     ) -> Result<(String, String), AppError> {
@@ -42,9 +43,9 @@ impl MessageService {
             r#"
             INSERT INTO "friend-messages" (
                 "message-uuid", "conversation-uuid", "sender-id", "receiver-id",
-                "message-content", "message-type", "file-url", "file-size", "send-time"
+                "message-content", "message-type", "file-uuid", "file-url", "file-size", "send-time"
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT ("message-uuid") DO NOTHING
             "#,
         )
@@ -54,6 +55,7 @@ impl MessageService {
         .bind(receiver_id)
         .bind(message_content)
         .bind(message_type)
+        .bind(&file_uuid)
         .bind(&file_url)
         .bind(file_size)
         .bind(send_time)
@@ -89,7 +91,7 @@ impl MessageService {
             sqlx::query_as(
                 r#"
                 SELECT "message-uuid", "conversation-uuid", "sender-id", "receiver-id",
-                       "message-content", "message-type", "file-url", "file-size", "send-time",
+                       "message-content", "message-type", "file-uuid", "file-url", "file-size", "send-time",
                        "is-deleted-by-sender", "is-deleted-by-receiver"
                 FROM "friend-messages"
                 WHERE "conversation-uuid" = $1
@@ -115,7 +117,7 @@ impl MessageService {
             sqlx::query_as(
                 r#"
                 SELECT "message-uuid", "conversation-uuid", "sender-id", "receiver-id",
-                       "message-content", "message-type", "file-url", "file-size", "send-time",
+                       "message-content", "message-type", "file-uuid", "file-url", "file-size", "send-time",
                        "is-deleted-by-sender", "is-deleted-by-receiver"
                 FROM "friend-messages"
                 WHERE "conversation-uuid" = $1

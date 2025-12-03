@@ -26,7 +26,8 @@
   - `receiver_id`: 接收者用户ID
   - `message_content`: 消息内容
   - `message_type`: 消息类型（text/image/video/file）
-  - `file_url`: 可选，文件URL（媒体消息时使用）
+  - `file_uuid`: 可选，文件UUID（优先使用，关联 file-uuid-mapping 表）
+  - `file_url`: 可选，文件URL（兼容保留）
   - `file_size`: 可选，文件大小（字节）
 
 - `GetMessagesRequest` - 获取消息列表请求（通过查询参数传递）
@@ -75,17 +76,18 @@
 
 ## 📊 数据库列名映射
 
-| Rust 字段 | 数据库列名 | 类型 |
-|-----------|-----------|------|
-| message_uuid | message-uuid | TEXT |
-| conversation_uuid | conversation-uuid | TEXT |
-| sender_id | sender-id | TEXT |
-| receiver_id | receiver-id | TEXT |
-| message_content | message-content | TEXT |
-| message_type | message-type | TEXT |
-| file_url | file-url | TEXT |
-| file_size | file-size | BIGINT |
-| send_time | send-time | TIMESTAMPTZ |
-| is_deleted_by_sender | is-deleted-by-sender | BOOLEAN |
-| is_deleted_by_receiver | is-deleted-by-receiver | BOOLEAN |
+| Rust 字段 | 数据库列名 | 类型 | 说明 |
+|-----------|-----------|------|------|
+| message_uuid | message-uuid | TEXT | 消息唯一标识 |
+| conversation_uuid | conversation-uuid | TEXT | 会话标识 |
+| sender_id | sender-id | TEXT | 发送者ID |
+| receiver_id | receiver-id | TEXT | 接收者ID |
+| message_content | message-content | TEXT | 消息内容 |
+| message_type | message-type | TEXT | 消息类型 |
+| file_uuid | file-uuid | VARCHAR(36) | 文件UUID（关联 file-uuid-mapping 表） |
+| file_url | file-url | TEXT | 文件访问URL |
+| file_size | file-size | BIGINT | 文件大小 |
+| send_time | send-time | TIMESTAMPTZ | 发送时间 |
+| is_deleted_by_sender | is-deleted-by-sender | BOOLEAN | 发送者是否删除 |
+| is_deleted_by_receiver | is-deleted-by-receiver | BOOLEAN | 接收者是否删除 |
 

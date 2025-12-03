@@ -67,6 +67,10 @@ pub struct Message {
     #[sqlx(rename = "message-type")]
     pub message_type: String,
     
+    #[serde(rename = "file_uuid")]
+    #[sqlx(rename = "file-uuid")]
+    pub file_uuid: Option<String>,
+    
     #[serde(rename = "file_url")]
     #[sqlx(rename = "file-url")]
     pub file_url: Option<String>,
@@ -96,6 +100,7 @@ pub struct MessageResponse {
     pub receiver_id: String,
     pub message_content: String,
     pub message_type: String,
+    pub file_uuid: Option<String>,
     pub file_url: Option<String>,
     pub file_size: Option<i64>,
     pub send_time: DateTime<Utc>,
@@ -109,6 +114,7 @@ impl From<Message> for MessageResponse {
             receiver_id: msg.receiver_id,
             message_content: msg.message_content,
             message_type: msg.message_type,
+            file_uuid: msg.file_uuid,
             file_url: msg.file_url,
             file_size: msg.file_size,
             send_time: msg.send_time,

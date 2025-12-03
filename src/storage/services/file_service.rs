@@ -384,6 +384,18 @@ impl FileService {
         content_type: &str,
         preview_support: &str,
     ) -> Result<String> {
+        // 查询文件记录获取 storage_location 和 related_id
+        let record: Option<(String, Option<String>)> = sqlx::query_as(
+            r#"SELECT "storage-location", "related-id" FROM "file-records" 
+            WHERE "upload-token" = $1 AND "status" = 'pending'"#
+        )
+        .bind(token)
+        .fetch_optional(&self.db)
+        .await?;
+
+        let (storage_location, related_id) = record
+            .ok_or_else(|| anyhow::anyhow!("Token无效或已过期"))?;
+
         // 创建UUID映射
         let file_uuid = self.uuid_mapping_service
             .create_mapping(file_key, actual_hash, file_size, content_type, preview_support, owner_id)
@@ -393,6 +405,16 @@ impl FileService {
         self.uuid_mapping_service
             .grant_permission(&file_uuid, owner_id, "owner", "upload")
             .await?;
+        
+        // 好友文件：同时授权好友访问
+        if storage_location == "friend_messages" {
+            if let Some(friend_id) = related_id {
+                info!("好友文件上传完成，授权好友 {} 访问", friend_id);
+                self.uuid_mapping_service
+                    .grant_permission(&file_uuid, &friend_id, "read", "friend_share")
+                    .await?;
+            }
+        }
         
         // 生成UUID访问URL
         let uuid_file_url = format!("{}/api/storage/file/{}", self.api_base_url, file_uuid);
@@ -426,6 +448,11 @@ impl FileService {
     /// 获取bucket名称
     pub fn get_bucket_name(&self, storage_location: &StorageLocation) -> &str {
         storage_location.to_bucket_name()
+    }
+
+    /// 获取UUID映射信息
+    pub async fn get_uuid_mapping(&self, file_uuid: &str) -> Result<Option<crate::storage::services::uuid_mapping::UuidMappingInfo>> {
+        self.uuid_mapping_service.get_by_uuid(file_uuid).await
     }
 
     /// 生成文件URL

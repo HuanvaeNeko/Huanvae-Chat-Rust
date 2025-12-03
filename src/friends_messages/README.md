@@ -41,7 +41,8 @@ src/friends_messages/
   "receiver_id": "user-456",
   "message_content": "你好，这是一条测试消息",
   "message_type": "text",
-  "file_url": null,      // 可选，媒体消息时填写
+  "file_uuid": null,     // 可选，文件UUID（优先使用）
+  "file_url": null,      // 可选，媒体消息时填写（兼容保留）
   "file_size": null      // 可选，文件大小（字节）
 }
 ```
@@ -88,6 +89,7 @@ src/friends_messages/
       "receiver_id": "user-456",
       "message_content": "你好",
       "message_type": "text",
+      "file_uuid": null,
       "file_url": null,
       "file_size": null,
       "send_time": "2025-11-27T10:30:00Z"
@@ -177,7 +179,8 @@ src/friends_messages/
 | receiver-id | TEXT | 接收者ID |
 | message-content | TEXT | 消息内容 |
 | message-type | TEXT | 消息类型 |
-| file-url | TEXT | 文件URL（可选） |
+| file-uuid | VARCHAR(36) | 文件UUID（关联 file-uuid-mapping 表） |
+| file-url | TEXT | 文件访问URL |
 | file-size | BIGINT | 文件大小（可选） |
 | send-time | TIMESTAMP | 发送时间（UTC） |
 | is-deleted-by-sender | BOOLEAN | 发送者是否删除 |
@@ -188,6 +191,7 @@ src/friends_messages/
 - `idx-messages-sender`: (sender-id)
 - `idx-messages-receiver`: (receiver-id)
 - `idx-messages-send-time`: (send-time DESC)
+- `idx-friend-messages-file-uuid`: (file-uuid) - 文件关联查询
 
 ---
 
@@ -375,9 +379,52 @@ cd /home/huanwei/Huanvae-Chat-Rust
 
 ---
 
+## 好友文件功能
+
+### 文件上传流程
+
+1. **请求上传**: `POST /api/storage/upload/request`
+   ```json
+   {
+     "file_type": "friend_image",
+     "storage_location": "friend_messages",
+     "related_id": "好友用户ID",
+     "filename": "photo.jpg",
+     "file_size": 1048576,
+     "content_type": "image/jpeg",
+     "file_hash": "采样哈希..."
+   }
+   ```
+
+2. **上传文件**: 使用返回的 `upload_url` 上传
+
+3. **发送消息**: 使用返回的 `file_uuid` 发送消息
+   ```json
+   {
+     "receiver_id": "好友用户ID",
+     "message_type": "image",
+     "message_content": "看看这张照片",
+     "file_uuid": "d2f612d5-70b0-4d4e-8779-86cf6aeb2b30"
+   }
+   ```
+
+### 文件访问流程
+
+1. **获取消息**: `GET /api/messages?friend_id=xxx`
+2. **获取预签名URL**: `POST /api/storage/friends-file/{file_uuid}/presigned-url`
+3. **使用预签名URL**: 直接访问图片/视频（支持流式传输）
+
+### 访问权限验证
+
+- 验证用户是会话参与者
+- **实时验证好友关系**（删除好友后无法访问）
+- 预签名URL默认3小时有效
+
+---
+
 ## 已知限制
 
-1. **消息类型**: 当前仅支持文本消息，图片/视频/文件消息需要先实现文件上传功能
+1. ~~**消息类型**: 当前仅支持文本消息~~ ✅ 已支持图片/视频/文件消息
 2. **实时推送**: 当前为 HTTP 轮询模式，未实现 WebSocket 实时推送
 3. **消息搜索**: 未实现消息内容全文搜索
 4. **未读计数**: 未实现未读消息统计（已规划 `friend-unread-messages` 表）
@@ -387,7 +434,7 @@ cd /home/huanwei/Huanvae-Chat-Rust
 
 ## 下一步计划
 
-- [ ] 实现文件上传服务（支持图片/视频/文件消息）
+- [x] 实现文件上传服务（支持图片/视频/文件消息）
 - [ ] 实现 WebSocket 实时消息推送
 - [ ] 实现未读消息计数功能
 - [ ] 实现消息已读回执
