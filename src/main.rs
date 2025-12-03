@@ -10,6 +10,8 @@ use huanvae_chat::auth::{handlers::create_auth_routes, utils::KeyManager};
 use huanvae_chat::config::get_config;
 use huanvae_chat::friends::handlers::create_friend_routes;
 use huanvae_chat::friends_messages::handlers::create_messages_routes;
+use huanvae_chat::groups::create_group_routes;
+use huanvae_chat::group_messages::create_group_messages_routes;
 use huanvae_chat::profile::handlers::routes::profile_routes;
 use huanvae_chat::storage::{create_storage_routes, S3Client};
 
@@ -256,6 +258,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 api_base_url,
             ),
         )
+        // 群聊路由
+        .nest(
+            "/api/groups",
+            create_group_routes(app_state.groups_state(), app_state.auth_state()),
+        )
+        // 群消息路由
+        .nest(
+            "/api/group-messages",
+            create_group_messages_routes(app_state.group_messages_state(), app_state.auth_state()),
+        )
         // CORS 中间件（从环境变量读取配置）
         .layer(configure_cors())
         // 日志中间件
@@ -291,6 +303,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("  POST /api/storage/upload/direct    - 直接上传文件");
     tracing::info!("  GET  /api/storage/multipart/part_url - 获取分片URL");
     tracing::info!("  GET  /api/storage/files             - 查询个人文件列表");
+    tracing::info!("  POST /api/groups                    - 创建群聊");
+    tracing::info!("  GET  /api/groups/my                 - 获取我的群聊列表");
+    tracing::info!("  GET  /api/groups/:id                - 获取群聊信息");
+    tracing::info!("  POST /api/groups/:id/invite         - 邀请成员入群");
+    tracing::info!("  POST /api/groups/:id/leave          - 退出群聊");
+    tracing::info!("  POST /api/groups/:id/transfer       - 转让群主");
+    tracing::info!("  POST /api/group-messages            - 发送群消息");
+    tracing::info!("  GET  /api/group-messages            - 获取群消息列表");
 
     axum::serve(listener, app).await?;
 

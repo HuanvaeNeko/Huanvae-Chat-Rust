@@ -22,10 +22,16 @@ common/
 ## 📦 使用模块
 
 以下模块已统一使用 `AppError`：
-- `profile` - 用户资料模块
-- `friends` - 好友系统模块
-- `friends_messages` - 好友消息模块
-- `storage` - 文件存储模块（部分）
+- ✅ `profile` - 用户资料模块
+- ✅ `friends` - 好友系统模块
+- ✅ `friends_messages` - 好友消息模块
+- ✅ `storage` - 文件存储模块（**已完全统一**）
+  - `client.rs` - S3/MinIO客户端（18个函数）
+  - `file_service.rs` - 文件服务（15个函数）
+  - `deduplication.rs` - 去重服务（1个函数）
+  - `uuid_mapping.rs` - UUID映射服务（7个函数）
+  - `validator.rs` - 文件验证服务（4个函数）
+  - `avatar.rs` - 头像服务（3个函数）
 
 ---
 
@@ -192,6 +198,25 @@ pub async fn some_service(&self) -> Result<Data, AppError> {
     Err(AppError::BadRequest("Something went wrong".to_string()))
 }
 ```
+
+**✅ 已完成迁移（2025-12-03）**
+
+Storage 模块已完全从 `anyhow::Error` 迁移到 `AppError`：
+- 删除了所有 `use anyhow::Result` 导入
+- 将所有 `anyhow::anyhow!` 替换为对应的 `AppError` 变体
+- 所有函数签名从 `Result<T, anyhow::Error>` 改为 `Result<T, AppError>`
+- 编译测试通过 ✅
+
+**迁移总结：**
+| 文件 | 修改函数数 | 状态 |
+|------|----------|------|
+| `storage/client.rs` | 18 | ✅ 完成 |
+| `storage/services/file_service.rs` | 15 | ✅ 完成 |
+| `storage/services/deduplication.rs` | 1 | ✅ 完成 |
+| `storage/services/uuid_mapping.rs` | 7 | ✅ 完成 |
+| `storage/services/validator.rs` | 4 | ✅ 完成 |
+| `storage/services/avatar.rs` | 3 | ✅ 完成 |
+| **总计** | **48** | **✅ 完成** |
 
 ### Auth 模块说明
 

@@ -1,11 +1,10 @@
-use anyhow::Result;
 use chrono::Utc;
 use sqlx::PgPool;
 use sqlx::Row;
 use std::sync::Arc;
 use tracing::info;
 
-use crate::common::generate_conversation_uuid;
+use crate::common::{generate_conversation_uuid, AppError};
 use crate::config::storage_config;
 use crate::storage::client::S3Client;
 use crate::storage::models::*;
@@ -38,7 +37,7 @@ impl FileService {
         &self,
         user_id: &str,
         request: FileUploadRequest,
-    ) -> Result<FileUploadResponse> {
+    ) -> Result<FileUploadResponse, AppError> {
         // 1. 验证哈希格式（如果提供了哈希）
         let file_hash = request.file_hash.as_deref().unwrap_or("no_hash");
         if request.file_hash.is_some() {
@@ -138,7 +137,7 @@ impl FileService {
         file_key: &str,
         request: &FileUploadRequest,
         preview_support: PreviewSupport,
-    ) -> Result<FileUploadResponse> {
+    ) -> Result<FileUploadResponse, AppError> {
         let file_hash = request.file_hash.as_deref().unwrap_or("no_hash");
         
         // 生成一次性Token
@@ -193,11 +192,11 @@ impl FileService {
         file_key: &str,
         request: &FileUploadRequest,
         preview_support: PreviewSupport,
-    ) -> Result<FileUploadResponse> {
+    ) -> Result<FileUploadResponse, AppError> {
         let file_hash = request.file_hash.as_deref().unwrap_or("no_hash");
         
         let expires_in = request.estimated_upload_time
-            .ok_or_else(|| anyhow::anyhow!("超大文件必须指定预计上传时间"))?;
+            .ok_or_else(|| AppError::BadRequest("超大文件必须指定预计上传时间".to_string()))?;
         
         let bucket = request.storage_location.to_bucket_name();
         
@@ -332,7 +331,7 @@ impl FileService {
         upload_token: &str,
         expires_in: u32,
         preview_support: &PreviewSupport,
-    ) -> Result<()> {
+    ) -> Result<(), AppError> {
         let expires_at = Utc::now() + chrono::Duration::seconds(expires_in as i64);
         
         sqlx::query(
@@ -364,7 +363,7 @@ impl FileService {
     pub async fn verify_and_get_upload_token(
         &self,
         token: &str,
-    ) -> Result<FileRecord> {
+    ) -> Result<FileRecord, AppError> {
         let record = sqlx::query_as::<_, FileRecord>(
             r#"SELECT * FROM "file-records"
             WHERE "upload-token" = $1
@@ -374,7 +373,7 @@ impl FileService {
         .bind(token)
         .fetch_optional(&self.db)
         .await?
-        .ok_or_else(|| anyhow::anyhow!("Token无效或已过期"))?;
+        .ok_or_else(|| AppError::BadRequest("Token无效或已过期".to_string()))?;
 
         Ok(record)
     }
@@ -389,7 +388,7 @@ impl FileService {
         file_size: i64,
         content_type: &str,
         preview_support: &str,
-    ) -> Result<String> {
+    ) -> Result<String, AppError> {
         // 查询文件记录获取 storage_location 和 related_id
         let record: Option<(String, Option<String>)> = sqlx::query_as(
             r#"SELECT "storage-location", "related-id" FROM "file-records" 
@@ -400,7 +399,7 @@ impl FileService {
         .await?;
 
         let (storage_location, related_id) = record
-            .ok_or_else(|| anyhow::anyhow!("Token无效或已过期"))?;
+            .ok_or_else(|| AppError::BadRequest("Token无效或已过期".to_string()))?;
 
         // 创建UUID映射
         let file_uuid = self.uuid_mapping_service
@@ -414,11 +413,34 @@ impl FileService {
         
         // 好友文件：同时授权好友访问
         if storage_location == "friend_messages" {
-            if let Some(friend_id) = related_id {
+            if let Some(ref friend_id) = related_id {
                 info!("好友文件上传完成，授权好友 {} 访问", friend_id);
                 self.uuid_mapping_service
-                    .grant_permission(&file_uuid, &friend_id, "read", "friend_share")
+                    .grant_permission(&file_uuid, friend_id, "read", "friend_share")
                     .await?;
+            }
+        }
+
+        // 群文件：授予所有活跃群成员读取权限
+        if storage_location == "group_files" {
+            if let Some(ref group_id_str) = related_id {
+                info!("群文件上传完成，授权群 {} 所有成员访问", group_id_str);
+                // 查询群内所有活跃成员
+                let members: Vec<(String,)> = sqlx::query_as(
+                    r#"SELECT "user-id" FROM "group-members" 
+                       WHERE "group-id" = $1::uuid AND "status" = 'active'"#
+                )
+                .bind(&group_id_str)
+                .fetch_all(&self.db)
+                .await?;
+
+                for (member_id,) in members {
+                    if member_id != owner_id {
+                        self.uuid_mapping_service
+                            .grant_permission(&file_uuid, &member_id, "read", "group_share")
+                            .await?;
+                    }
+                }
             }
         }
         
@@ -445,7 +467,7 @@ impl FileService {
         .await?;
 
         if result.rows_affected() == 0 {
-            return Err(anyhow::anyhow!("Token无效或哈希不匹配"));
+            return Err(AppError::BadRequest("Token无效或哈希不匹配".to_string()));
         }
 
         Ok(uuid_file_url)
@@ -457,7 +479,7 @@ impl FileService {
     }
 
     /// 获取UUID映射信息
-    pub async fn get_uuid_mapping(&self, file_uuid: &str) -> Result<Option<crate::storage::services::uuid_mapping::UuidMappingInfo>> {
+    pub async fn get_uuid_mapping(&self, file_uuid: &str) -> Result<Option<crate::storage::services::uuid_mapping::UuidMappingInfo>, AppError> {
         self.uuid_mapping_service.get_by_uuid(file_uuid).await
     }
 
@@ -474,7 +496,7 @@ impl FileService {
         upload_id: &str,
         part_number: i32,
         user_id: &str,
-    ) -> Result<MultipartPartResponse> {
+    ) -> Result<MultipartPartResponse, AppError> {
         // 验证upload_id属于该用户
         let record = sqlx::query_as::<_, FileRecord>(
             r#"SELECT * FROM "file-records"
@@ -488,10 +510,10 @@ impl FileService {
         .bind(user_id)
         .fetch_optional(&self.db)
         .await?
-        .ok_or_else(|| anyhow::anyhow!("无效的upload_id"))?;
+        .ok_or_else(|| AppError::BadRequest("无效的upload_id".to_string()))?;
 
         let storage_loc: StorageLocation = record.storage_location.parse()
-            .map_err(|e: String| anyhow::anyhow!(e))?;
+            .map_err(|e: String| AppError::BadRequest(e))?;
         let bucket = self.get_bucket_name(&storage_loc);
         
         let multipart_ttl = storage_config().multipart_url_ttl;
@@ -512,7 +534,7 @@ impl FileService {
         user_id: &str,
         file_uuid: &str,
         expires_in: u32,
-    ) -> Result<PresignedUrlResponse> {
+    ) -> Result<PresignedUrlResponse, AppError> {
         // 1. 查询UUID映射表获取物理文件信息
         let mapping: UuidMappingRecord = sqlx::query_as(
             r#"
@@ -525,7 +547,7 @@ impl FileService {
         .bind(file_uuid)
         .fetch_optional(&self.db)
         .await?
-        .ok_or_else(|| anyhow::anyhow!("文件不存在"))?;
+        .ok_or_else(|| AppError::NotFound("文件".to_string()))?;
 
         // 2. 验证用户权限
         let _permission: PermissionRecord = sqlx::query_as(
@@ -539,7 +561,7 @@ impl FileService {
         .bind(user_id)
         .fetch_optional(&self.db)
         .await?
-        .ok_or_else(|| anyhow::anyhow!("无权访问此文件"))?;
+        .ok_or_else(|| AppError::Forbidden)?;
 
         // 3. 根据physical_file_key判断bucket
         // physical_file_key格式: user_id/type/timestamp_hash_filename
@@ -593,7 +615,7 @@ impl FileService {
         limit: i32,
         sort_by: String,
         sort_order: String,
-    ) -> Result<FileListResponse> {
+    ) -> Result<FileListResponse, AppError> {
         // 1. 参数验证
         let page = page.max(1);
         let limit = limit.clamp(1, 100);

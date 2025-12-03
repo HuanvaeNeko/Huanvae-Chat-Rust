@@ -104,6 +104,29 @@
 
 ---
 
+### 群聊系统
+
+#### `06_group_system.sql`
+**用途**: 创建群聊相关表
+
+**创建的表**:
+- `groups` - 群聊主表（重建）
+- `group-members` - 群成员表
+- `group-join-requests` - 入群申请/邀请表
+- `group-invite-codes` - 邀请码表
+- `group-notices` - 群公告表
+- `group-messages` - 群消息表
+- `group-message-deletions` - 消息删除记录表
+- `group-unread-messages` - 未读消息表
+
+**其他内容**:
+- 20+ 索引
+- 6个触发器（自动更新时间戳）
+- 视图 `view-user-groups`（用户已加入的群聊）
+- 表和字段注释
+
+---
+
 ## 🚀 执行顺序
 
 PostgreSQL 会按照文件名的字母顺序执行初始化脚本：
@@ -113,6 +136,7 @@ PostgreSQL 会按照文件名的字母顺序执行初始化脚本：
 3. `03_friend_system.sql` - 好友系统
 4. `04_file_system.sql` - 文件系统
 5. `05_indexes.sql` - 补充索引
+6. `06_group_system.sql` - 群聊系统
 
 **重要**: 请保持文件名前缀的数字顺序，否则可能导致外键约束失败。
 
@@ -135,7 +159,13 @@ users (用户表)
   └─→ user-storage-quotas (存储配额)
 
 groups (群聊表)
-  └─→ (暂无外键关联，待迁移)
+  ├─→ group-members (群成员)
+  ├─→ group-join-requests (入群申请)
+  ├─→ group-invite-codes (邀请码)
+  ├─→ group-notices (群公告)
+  ├─→ group-messages (群消息)
+  ├─→ group-message-deletions (消息删除记录)
+  └─→ group-unread-messages (未读消息)
 
 file-uuid-mapping (UUID映射)
   └─→ file-access-permissions (文件权限)
@@ -150,7 +180,8 @@ file-uuid-mapping (UUID映射)
 | 好友系统 | 4 | 18 | 2 |
 | 文件系统 | 4 | 10 | 1 |
 | 补充索引 | - | 14 | - |
-| **总计** | **13** | **60** | **5** |
+| 群聊系统 | 8 | 20+ | 6 |
+| **总计** | **21** | **80+** | **11** |
 
 ---
 

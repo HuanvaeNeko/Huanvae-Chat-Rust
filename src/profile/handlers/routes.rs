@@ -3,6 +3,7 @@ use crate::auth::services::BlacklistService;
 use crate::profile::services::ProfileService;
 use crate::storage::S3Client;
 use axum::{
+    extract::DefaultBodyLimit,
     middleware,
     routing::{get, post, put},
     Router,
@@ -38,6 +39,7 @@ pub fn profile_routes(
         .route("/api/profile", put(update_profile))
         .route("/api/profile/password", put(update_password))
         .route("/api/profile/avatar", post(upload_avatar))
+        .layer(DefaultBodyLimit::max(15 * 1024 * 1024)) // 15MB 限制（头像最大10MB + 余量）
         .layer(middleware::from_fn_with_state(auth_state, auth_guard))
         .with_state(state)
 }

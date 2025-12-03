@@ -1,6 +1,7 @@
-use anyhow::Result;
 use sqlx::PgPool;
 use uuid::Uuid;
+
+use crate::common::AppError;
 
 /// UUID映射信息
 #[derive(Debug, Clone)]
@@ -24,7 +25,7 @@ impl UuidMappingService {
     }
 
     /// 通过哈希查找已存在的UUID映射
-    pub async fn find_by_hash(&self, file_hash: &str) -> Result<Option<UuidMappingInfo>> {
+    pub async fn find_by_hash(&self, file_hash: &str) -> Result<Option<UuidMappingInfo>, AppError> {
         let result = sqlx::query_as::<_, UuidMappingRow>(
             r#"SELECT "uuid", "physical-file-key", "file-hash", "file-size", "content-type", "preview-support"
              FROM "file-uuid-mapping"
@@ -54,7 +55,7 @@ impl UuidMappingService {
         content_type: &str,
         preview_support: &str,
         uploader_id: &str,
-    ) -> Result<String> {
+    ) -> Result<String, AppError> {
         let uuid = Uuid::new_v4().to_string();
 
         sqlx::query(
@@ -76,7 +77,7 @@ impl UuidMappingService {
     }
 
     /// 通过UUID获取映射信息
-    pub async fn get_by_uuid(&self, uuid: &str) -> Result<Option<UuidMappingInfo>> {
+    pub async fn get_by_uuid(&self, uuid: &str) -> Result<Option<UuidMappingInfo>, AppError> {
         let result = sqlx::query_as::<_, UuidMappingRow>(
             r#"SELECT "uuid", "physical-file-key", "file-hash", "file-size", "content-type", "preview-support"
              FROM "file-uuid-mapping"
@@ -103,7 +104,7 @@ impl UuidMappingService {
         user_id: &str,
         access_type: &str,
         granted_by: &str,
-    ) -> Result<()> {
+    ) -> Result<(), AppError> {
         sqlx::query(
             r#"INSERT INTO "file-access-permissions" 
              ("file-uuid", "user-id", "access-type", "granted-by")
@@ -120,7 +121,7 @@ impl UuidMappingService {
     }
 
     /// 检查用户是否有访问权限
-    pub async fn check_permission(&self, file_uuid: &str, user_id: &str) -> Result<bool> {
+    pub async fn check_permission(&self, file_uuid: &str, user_id: &str) -> Result<bool, AppError> {
         let result = sqlx::query_scalar::<_, i64>(
             r#"SELECT COUNT(*) FROM "file-access-permissions"
              WHERE "file-uuid" = $1 AND "user-id" = $2 AND "revoked-at" IS NULL"#
@@ -134,7 +135,7 @@ impl UuidMappingService {
     }
 
     /// 撤销用户访问权限（软删除）
-    pub async fn revoke_permission(&self, file_uuid: &str, user_id: &str) -> Result<()> {
+    pub async fn revoke_permission(&self, file_uuid: &str, user_id: &str) -> Result<(), AppError> {
         sqlx::query(
             r#"UPDATE "file-access-permissions" 
              SET "revoked-at" = NOW()

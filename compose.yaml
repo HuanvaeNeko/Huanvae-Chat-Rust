@@ -14,6 +14,9 @@ services:
       - ./Nginx/logs:/var/log/nginx
     networks:
       - frontend
+      - backend
+    depends_on:
+      - minio
     deploy:
       resources:
         limits:
@@ -68,6 +71,9 @@ services:
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
+    expose:
+      - "9000"
+      - "9001"
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
@@ -97,7 +103,6 @@ networks:
     driver: bridge
   backend:
     driver: bridge
-    internal: true
 
 volumes:
   postgres_data:

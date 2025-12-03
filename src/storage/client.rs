@@ -10,18 +10,22 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, warn};
 
+use crate::common::AppError;
 use crate::config::MinioConfig;
 
 /// S3/MinIO 客户端封装
 #[derive(Clone)]
 pub struct S3Client {
+    /// 内部操作客户端（上传、删除等）
     client: Arc<Client>,
+    /// 预签名URL专用客户端（签名计算用）
+    presign_client: Arc<Client>,
     config: MinioConfig,
 }
 
 impl S3Client {
     /// 创建新的 S3 客户端
-    pub async fn new(config: MinioConfig) -> Result<Self, anyhow::Error> {
+    pub async fn new(config: MinioConfig) -> Result<Self, AppError> {
         // 创建凭证
         let credentials = Credentials::new(
             &config.access_key,
@@ -31,19 +35,31 @@ impl S3Client {
             "custom",
         );
 
-        // 构建 S3 配置
+        // 构建内部操作的 S3 配置（使用 endpoint）
         let s3_config = S3ConfigBuilder::new()
             .region(Region::new(config.region.clone()))
             .endpoint_url(&config.endpoint)
-            .credentials_provider(credentials)
-            .force_path_style(true) // MinIO 需要 path-style
+            .credentials_provider(credentials.clone())
+            .force_path_style(true)
             .behavior_version(BehaviorVersion::latest())
             .build();
 
         let client = Arc::new(Client::from_conf(s3_config));
 
+        // 构建预签名URL专用的 S3 配置（使用 presign_endpoint）
+        let presign_config = S3ConfigBuilder::new()
+            .region(Region::new(config.region.clone()))
+            .endpoint_url(&config.presign_endpoint)
+            .credentials_provider(credentials)
+            .force_path_style(true)
+            .behavior_version(BehaviorVersion::latest())
+            .build();
+
+        let presign_client = Arc::new(Client::from_conf(presign_config));
+
         let s3_client = Self {
             client,
+            presign_client,
             config: config.clone(),
         };
 
@@ -54,7 +70,7 @@ impl S3Client {
     }
 
     /// 初始化所有必要的 buckets
-    async fn init_buckets(&self) -> Result<(), anyhow::Error> {
+    async fn init_buckets(&self) -> Result<(), AppError> {
         // 创建 avatars bucket（公开）
         self.create_bucket_if_not_exists(&self.config.bucket_avatars)
             .await?;
@@ -72,7 +88,7 @@ impl S3Client {
     }
 
     /// 创建 bucket（如果不存在）
-    async fn create_bucket_if_not_exists(&self, bucket: &str) -> Result<(), anyhow::Error> {
+    async fn create_bucket_if_not_exists(&self, bucket: &str) -> Result<(), AppError> {
         match self.client.head_bucket().bucket(bucket).send().await {
             Ok(_) => {
                 info!("Bucket '{}' already exists", bucket);
@@ -85,7 +101,7 @@ impl S3Client {
                     .bucket(bucket)
                     .send()
                     .await
-                    .map_err(|e| anyhow::anyhow!("Failed to create bucket: {}", e))?;
+                    .map_err(|e| AppError::Storage(format!("Failed to create bucket: {}", e)))?;
                 info!("Bucket '{}' created successfully", bucket);
                 Ok(())
             }
@@ -93,7 +109,7 @@ impl S3Client {
     }
 
     /// 设置 bucket 为公开读取
-    async fn set_bucket_public_read(&self, bucket: &str) -> Result<(), anyhow::Error> {
+    async fn set_bucket_public_read(&self, bucket: &str) -> Result<(), AppError> {
         let policy = format!(
             r#"{{
                 "Version": "2012-10-17",
@@ -135,7 +151,7 @@ impl S3Client {
         key: &str,
         data: Vec<u8>,
         content_type: &str,
-    ) -> Result<String, anyhow::Error> {
+    ) -> Result<String, AppError> {
         let body = ByteStream::from(data);
 
         self.client
@@ -146,7 +162,7 @@ impl S3Client {
             .content_type(content_type)
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to upload file: {}", e))?;
+            .map_err(|e| AppError::Storage(format!("Failed to upload file: {}", e)))?;
 
         // 返回公开访问 URL
         let url = format!("{}/{}/{}", self.config.public_url, bucket, key);
@@ -159,7 +175,7 @@ impl S3Client {
         user_id: &str,
         data: Vec<u8>,
         extension: &str,
-    ) -> Result<String, anyhow::Error> {
+    ) -> Result<String, AppError> {
         let key = format!("{}.{}", user_id, extension);
         let content_type = match extension {
             "jpg" | "jpeg" => "image/jpeg",
@@ -174,30 +190,30 @@ impl S3Client {
     }
 
     /// 删除文件
-    pub async fn delete_file(&self, bucket: &str, key: &str) -> Result<(), anyhow::Error> {
+    pub async fn delete_file(&self, bucket: &str, key: &str) -> Result<(), AppError> {
         self.client
             .delete_object()
             .bucket(bucket)
             .key(key)
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to delete file: {}", e))?;
+            .map_err(|e| AppError::Storage(format!("Failed to delete file: {}", e)))?;
 
         Ok(())
     }
 
     /// 读取文件内容
-    pub async fn get_file(&self, bucket: &str, key: &str) -> Result<Vec<u8>, anyhow::Error> {
+    pub async fn get_file(&self, bucket: &str, key: &str) -> Result<Vec<u8>, AppError> {
         let response = self.client
             .get_object()
             .bucket(bucket)
             .key(key)
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to get file: {}", e))?;
+            .map_err(|e| AppError::Storage(format!("Failed to get file: {}", e)))?;
 
         let data = response.body.collect().await
-            .map_err(|e| anyhow::anyhow!("Failed to read file body: {}", e))?;
+            .map_err(|e| AppError::Storage(format!("Failed to read file body: {}", e)))?;
 
         Ok(data.to_vec())
     }
@@ -214,11 +230,11 @@ impl S3Client {
         key: &str,
         content_type: &str,
         expires_in: u32,
-    ) -> Result<String, anyhow::Error> {
+    ) -> Result<String, AppError> {
         let presigning_config = PresigningConfig::builder()
             .expires_in(Duration::from_secs(expires_in as u64))
             .build()
-            .map_err(|e| anyhow::anyhow!("Failed to build presigning config: {}", e))?;
+            .map_err(|e| AppError::Storage(format!("Failed to build presigning config: {}", e)))?;
 
         let presigned = self.client
             .put_object()
@@ -227,30 +243,32 @@ impl S3Client {
             .content_type(content_type)
             .presigned(presigning_config)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to generate presigned URL: {}", e))?;
+            .map_err(|e| AppError::Storage(format!("Failed to generate presigned URL: {}", e)))?;
 
         Ok(presigned.uri().to_string())
     }
 
     /// 生成预签名下载URL（GET方法）
+    /// 使用 presign_client 生成，签名基于 MINIO_PRESIGN_ENDPOINT 计算
     pub async fn generate_presigned_download_url(
         &self,
         bucket: &str,
         key: &str,
         expires_in: u32,
-    ) -> Result<String, anyhow::Error> {
+    ) -> Result<String, AppError> {
         let presigning_config = PresigningConfig::builder()
             .expires_in(Duration::from_secs(expires_in as u64))
             .build()
-            .map_err(|e| anyhow::anyhow!("Failed to build presigning config: {}", e))?;
+            .map_err(|e| AppError::Storage(format!("Failed to build presigning config: {}", e)))?;
 
-        let presigned = self.client
+        // 使用 presign_client 生成预签名URL，签名基于 presign_endpoint 计算
+        let presigned = self.presign_client
             .get_object()
             .bucket(bucket)
             .key(key)
             .presigned(presigning_config)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to generate presigned URL: {}", e))?;
+            .map_err(|e| AppError::Storage(format!("Failed to generate presigned URL: {}", e)))?;
 
         Ok(presigned.uri().to_string())
     }
@@ -261,7 +279,7 @@ impl S3Client {
         bucket: &str,
         key: &str,
         content_type: &str,
-    ) -> Result<String, anyhow::Error> {
+    ) -> Result<String, AppError> {
         let result = self.client
             .create_multipart_upload()
             .bucket(bucket)
@@ -269,10 +287,10 @@ impl S3Client {
             .content_type(content_type)
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to initiate multipart upload: {}", e))?;
+            .map_err(|e| AppError::Storage(format!("Failed to initiate multipart upload: {}", e)))?;
 
         let upload_id = result.upload_id()
-            .ok_or_else(|| anyhow::anyhow!("No upload_id returned"))?;
+            .ok_or_else(|| AppError::Storage("No upload_id returned".to_string()))?;
 
         Ok(upload_id.to_string())
     }
@@ -285,11 +303,11 @@ impl S3Client {
         upload_id: &str,
         part_number: i32,
         expires_in: u32,
-    ) -> Result<String, anyhow::Error> {
+    ) -> Result<String, AppError> {
         let presigning_config = PresigningConfig::builder()
             .expires_in(Duration::from_secs(expires_in as u64))
             .build()
-            .map_err(|e| anyhow::anyhow!("Failed to build presigning config: {}", e))?;
+            .map_err(|e| AppError::Storage(format!("Failed to build presigning config: {}", e)))?;
 
         let presigned = self.client
             .upload_part()
@@ -299,13 +317,13 @@ impl S3Client {
             .part_number(part_number)
             .presigned(presigning_config)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to generate presigned part URL: {}", e))?;
+            .map_err(|e| AppError::Storage(format!("Failed to generate presigned part URL: {}", e)))?;
 
         Ok(presigned.uri().to_string())
     }
 
     /// 检查文件是否存在
-    pub async fn file_exists(&self, bucket: &str, key: &str) -> Result<bool, anyhow::Error> {
+    pub async fn file_exists(&self, bucket: &str, key: &str) -> Result<bool, AppError> {
         match self.client
             .head_object()
             .bucket(bucket)
@@ -323,14 +341,14 @@ impl S3Client {
         &self,
         bucket: &str,
         key: &str,
-    ) -> Result<FileMetadata, anyhow::Error> {
+    ) -> Result<FileMetadata, AppError> {
         let result = self.client
             .head_object()
             .bucket(bucket)
             .key(key)
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to get file metadata: {}", e))?;
+            .map_err(|e| AppError::Storage(format!("Failed to get file metadata: {}", e)))?;
 
         Ok(FileMetadata {
             content_length: result.content_length().unwrap_or(0) as u64,

@@ -1,3 +1,4 @@
+use crate::common::AppError;
 use crate::storage::S3Client;
 use tracing::info;
 
@@ -6,35 +7,35 @@ pub struct AvatarService;
 
 impl AvatarService {
     /// 验证文件扩展名
-    pub fn validate_extension(filename: &str) -> Result<String, String> {
+    pub fn validate_extension(filename: &str) -> Result<String, AppError> {
         let allowed_extensions = ["jpg", "jpeg", "png", "gif", "webp"];
         
         let extension = filename
             .rsplit('.')
             .next()
-            .ok_or("No file extension found")?
+            .ok_or_else(|| AppError::ValidationError("No file extension found".to_string()))?
             .to_lowercase();
 
         if allowed_extensions.contains(&extension.as_str()) {
             Ok(extension)
         } else {
-            Err(format!(
+            Err(AppError::ValidationError(format!(
                 "Unsupported file format. Allowed: {}",
                 allowed_extensions.join(", ")
-            ))
+            )))
         }
     }
 
-    /// 验证文件大小（最大 5MB）
-    pub fn validate_size(data: &[u8]) -> Result<(), String> {
-        const MAX_SIZE: usize = 5 * 1024 * 1024; // 5MB
+    /// 验证文件大小（最大 10MB）
+    pub fn validate_size(data: &[u8]) -> Result<(), AppError> {
+        const MAX_SIZE: usize = 10 * 1024 * 1024; // 10MB
 
         if data.len() > MAX_SIZE {
-            Err(format!(
+            Err(AppError::ValidationError(format!(
                 "File too large. Maximum size: {} MB, got: {:.2} MB",
                 MAX_SIZE / 1024 / 1024,
                 data.len() as f64 / 1024.0 / 1024.0
-            ))
+            )))
         } else {
             Ok(())
         }
@@ -46,14 +47,12 @@ impl AvatarService {
         user_id: &str,
         data: Vec<u8>,
         filename: &str,
-    ) -> Result<String, anyhow::Error> {
+    ) -> Result<String, AppError> {
         // 验证文件大小
-        Self::validate_size(&data)
-            .map_err(|e| anyhow::anyhow!("File validation failed: {}", e))?;
+        Self::validate_size(&data)?;
 
         // 验证文件扩展名
-        let extension = Self::validate_extension(filename)
-            .map_err(|e| anyhow::anyhow!("File validation failed: {}", e))?;
+        let extension = Self::validate_extension(filename)?;
 
         info!(
             "Uploading avatar for user: {}, size: {} bytes, extension: {}",

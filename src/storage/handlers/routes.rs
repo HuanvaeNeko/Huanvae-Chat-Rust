@@ -51,8 +51,8 @@ pub fn create_storage_routes(
     
     // 好友文件预签名URL路由
     let friends_file_router = Router::new()
-        .route("/friends-file/{uuid}/presigned-url", post(generate_friend_file_presigned_url))
-        .route("/friends-file/{uuid}/presigned-url/extended", post(generate_friend_file_extended_presigned_url))
+        .route("/friends_file/{uuid}/presigned_url", post(generate_friend_file_presigned_url))
+        .route("/friends_file/{uuid}/presigned_url/extended", post(generate_friend_file_extended_presigned_url))
         .route_layer(middleware::from_fn_with_state(
             auth_state.clone(),
             crate::auth::middleware::auth_guard,

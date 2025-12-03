@@ -1,5 +1,5 @@
+use crate::common::AppError;
 use crate::storage::models::{FileType, PreviewSupport, UploadMode};
-use anyhow::Result;
 
 /// 文件验证服务
 pub struct FileValidator;
@@ -19,7 +19,7 @@ impl FileValidator {
         content_type: &str,
         file_size: u64,
         is_friend_message: bool,
-    ) -> Result<(FileType, PreviewSupport)> {
+    ) -> Result<(FileType, PreviewSupport), AppError> {
         // 图片处理
         if content_type.starts_with("image/") {
             if file_size <= 100 * 1024 * 1024 {  // 100MB
@@ -37,7 +37,7 @@ impl FileValidator {
                 };
                 Ok((file_type, PreviewSupport::DownloadOnly))
             } else {
-                Err(anyhow::anyhow!("图片大小超过15GB，请使用超大文件上传"))
+                Err(AppError::BadRequest("图片大小超过15GB，请使用超大文件上传".to_string()))
             }
         }
         // 视频处理
@@ -57,7 +57,7 @@ impl FileValidator {
                 };
                 Ok((file_type, PreviewSupport::DownloadOnly))
             } else {
-                Err(anyhow::anyhow!("视频大小超过30GB，请联系管理员使用超大文件上传流程"))
+                Err(AppError::BadRequest("视频大小超过30GB，请联系管理员使用超大文件上传流程".to_string()))
             }
         }
         // 普通文档
@@ -72,19 +72,19 @@ impl FileValidator {
             } else if file_size <= 30 * 1024 * 1024 * 1024 {  // 30GB
                 Ok((FileType::UserDocument, PreviewSupport::DownloadOnly))
             } else {
-                Err(anyhow::anyhow!("文件大小超过30GB，请联系管理员使用超大文件上传流程"))
+                Err(AppError::BadRequest("文件大小超过30GB，请联系管理员使用超大文件上传流程".to_string()))
             }
         }
     }
 
     /// 验证哈希格式
-    pub fn validate_hash(hash: &str) -> Result<()> {
+    pub fn validate_hash(hash: &str) -> Result<(), AppError> {
         if hash.len() != 64 {
-            return Err(anyhow::anyhow!("哈希值必须是64位十六进制字符串（SHA-256）"));
+            return Err(AppError::ValidationError("哈希值必须是64位十六进制字符串（SHA-256）".to_string()));
         }
         
         if !hash.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(anyhow::anyhow!("哈希值包含非法字符"));
+            return Err(AppError::ValidationError("哈希值包含非法字符".to_string()));
         }
         
         Ok(())
@@ -107,19 +107,19 @@ impl FileValidator {
     pub fn validate_file_type(
         file_type: &FileType,
         content_type: &str,
-    ) -> Result<()> {
+    ) -> Result<(), AppError> {
         match file_type {
             FileType::Avatar | FileType::UserImage | FileType::UserImageFile |
             FileType::FriendImage | FileType::FriendImageFile | FileType::GroupImage => {
                 // 图片类型 - 添加更多格式支持
                 if !["image/jpeg", "image/png", "image/gif", "image/webp", "image/jpg", "image/tiff", "image/tif"].contains(&content_type) {
-                    return Err(anyhow::anyhow!("不支持的图片格式，仅支持：jpg、png、gif、webp、tiff"));
+                    return Err(AppError::ValidationError("不支持的图片格式，仅支持：jpg、png、gif、webp、tiff".to_string()));
                 }
             }
             FileType::UserVideo | FileType::UserVideoFile |
             FileType::FriendVideo | FileType::FriendVideoFile | FileType::GroupVideo => {
                 if !content_type.starts_with("video/") {
-                    return Err(anyhow::anyhow!("不支持的视频格式"));
+                    return Err(AppError::ValidationError("不支持的视频格式".to_string()));
                 }
             }
             _ => {} // 文档类型不限制
@@ -131,14 +131,14 @@ impl FileValidator {
     pub fn validate_file_size(
         file_type: &FileType,
         size: u64,
-    ) -> Result<()> {
+    ) -> Result<(), AppError> {
         let max_size = Self::get_max_file_size(file_type);
         
         if size > max_size {
-            return Err(anyhow::anyhow!(
+            return Err(AppError::ValidationError(format!(
                 "文件大小超过限制: 最大 {} MB",
                 max_size / 1024 / 1024
-            ));
+            )));
         }
         Ok(())
     }

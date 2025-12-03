@@ -22,10 +22,10 @@ avatars/{user-id}.{extension}
 
 **支持格式**: jpg, jpeg, png, gif, webp
 
-**大小限制**: 5 MB
+**大小限制**: 10 MB
 
 **访问方式**:
-- 直接访问: `http://localhost:9000/avatars/user-123.jpg`
+- 通过 Nginx 代理: `http://localhost/avatars/user-123.jpg`
 - 无需 Token 验证
 
 ---
@@ -169,7 +169,7 @@ let presigned_url = s3_client.presign_get(
 **支持格式**: jpg, jpeg, png, gif, webp
 
 **大小限制**:
-- 头像: 5 MB
+- 头像: 10 MB
 - 聊天图片: 10 MB
 
 ### 视频文件 (videos/)

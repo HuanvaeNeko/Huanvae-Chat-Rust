@@ -8,10 +8,13 @@ use serde_json::{json, Value};
 use sqlx::PgPool;
 use std::sync::Arc;
 use tracing::{error, info};
+use uuid::Uuid;
 
 use crate::auth::middleware::AuthContext;
 use crate::friends::services::verify_friendship;
 use crate::friends_messages::services::MessageService;
+use crate::group_messages::services::GroupMessageService;
+use crate::groups::services::MemberService as GroupMemberService;
 use crate::storage::client::S3Client;
 use crate::storage::models::*;
 use crate::storage::services::FileService;
@@ -23,17 +26,23 @@ pub struct StorageState {
     pub file_service: Arc<FileService>,
     pub s3_client: Arc<S3Client>,
     pub message_service: MessageService,
+    pub group_message_service: GroupMessageService,
+    pub group_member_service: GroupMemberService,
 }
 
 impl StorageState {
     pub fn new(db: PgPool, s3_client: Arc<S3Client>, api_base_url: String) -> Self {
         let file_service = Arc::new(FileService::new(db.clone(), s3_client.clone(), api_base_url));
         let message_service = MessageService::new(db.clone());
+        let group_message_service = GroupMessageService::new(db.clone());
+        let group_member_service = GroupMemberService::new(db.clone());
         Self {
             db,
             file_service,
             s3_client,
             message_service,
+            group_message_service,
+            group_member_service,
         }
     }
 }
@@ -75,11 +84,47 @@ pub async fn request_upload(
         }
     }
 
+    // 群文件上传：验证群成员身份
+    let is_group_file = request.storage_location == StorageLocation::GroupFiles;
+    if is_group_file {
+        let group_id_str = request.related_id.as_ref().ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "群ID不能为空" })),
+            )
+        })?;
+
+        let group_uuid = Uuid::parse_str(group_id_str).map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "无效的群ID格式" })),
+            )
+        })?;
+
+        match state.group_member_service.verify_active_member(&group_uuid, &auth_ctx.user_id).await {
+            Ok(is_member) => {
+                if !is_member {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({ "error": "您不是该群成员，无法上传文件" })),
+                    ));
+                }
+            }
+            Err(e) => {
+                error!("验证群成员身份失败: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "验证群成员身份失败" })),
+                ));
+            }
+        }
+    }
+
     // 保存请求信息用于秒传后发送消息
     let filename = request.filename.clone();
     let content_type = request.content_type.clone();
     let file_size = request.file_size;
-    let friend_id = request.related_id.clone();
+    let related_id = request.related_id.clone();
 
     match state.file_service
         .request_upload(&auth_ctx.user_id.to_string(), request)
@@ -88,7 +133,7 @@ pub async fn request_upload(
         Ok(mut response) => {
             // 好友文件秒传：自动发送消息
             if response.instant_upload && is_friend_file {
-                if let Some(ref friend_id) = friend_id {
+                if let Some(ref friend_id) = related_id {
                     // 提取 file_uuid
                     let file_uuid = response.existing_file_url.as_ref()
                         .and_then(|url| url.rsplit('/').next())
@@ -120,6 +165,48 @@ pub async fn request_upload(
                         }
                         Err(e) => {
                             error!("秒传文件消息发送失败: {}", e);
+                        }
+                    }
+                }
+            }
+
+            // 群文件秒传：自动发送群消息
+            if response.instant_upload && is_group_file {
+                if let Some(ref group_id_str) = related_id {
+                    if let Ok(group_uuid) = Uuid::parse_str(group_id_str) {
+                        // 提取 file_uuid
+                        let file_uuid = response.existing_file_url.as_ref()
+                            .and_then(|url| url.rsplit('/').next())
+                            .unwrap_or("")
+                            .to_string();
+                        
+                        // 确定消息类型和内容
+                        let (message_type, message_content) = determine_message_type_and_content_simple(
+                            &content_type,
+                            &filename,
+                        );
+                        
+                        info!("群文件秒传完成，自动发送 {} 消息到群 {}", message_type, group_id_str);
+                        
+                        // 发送群消息
+                        match state.group_message_service.send_message(
+                            &group_uuid,
+                            &auth_ctx.user_id,
+                            &message_content,
+                            &message_type,
+                            Some(&file_uuid),
+                            response.existing_file_url.as_deref(),
+                            Some(file_size as i64),
+                            None,
+                        ).await {
+                            Ok(resp) => {
+                                info!("群文件秒传消息已自动发送: {}", resp.message_uuid);
+                                response.message_uuid = Some(resp.message_uuid);
+                                response.message_send_time = Some(resp.send_time);
+                            }
+                            Err(e) => {
+                                error!("群文件秒传消息发送失败: {}", e);
+                            }
                         }
                     }
                 }
@@ -292,6 +379,42 @@ pub async fn direct_upload(
                         Err(e) => {
                             error!("自动发送文件消息失败: {}", e);
                             // 消息发送失败不影响文件上传结果
+                        }
+                    }
+                }
+            }
+
+            // 8. 群文件：自动发送群消息
+            if storage_loc == StorageLocation::GroupFiles {
+                if let Some(group_id_str) = &file_record.related_id {
+                    if let Ok(group_uuid) = Uuid::parse_str(group_id_str) {
+                        // 根据文件类型确定消息类型和内容
+                        let (message_type, message_content) = determine_message_type_and_content(
+                            &file_record.content_type,
+                            &file_record.file_key,
+                        );
+                        
+                        info!("群文件上传完成，自动发送 {} 消息到群 {}", message_type, group_id_str);
+                        
+                        match state.group_message_service.send_message(
+                            &group_uuid,
+                            &file_record.owner_id,
+                            &message_content,
+                            &message_type,
+                            Some(&file_uuid),
+                            Some(&uuid_file_url),
+                            Some(file_record.file_size),
+                            None,
+                        ).await {
+                            Ok(resp) => {
+                                info!("群文件消息自动发送成功: {}", resp.message_uuid);
+                                message_uuid = Some(resp.message_uuid);
+                                message_send_time = Some(resp.send_time);
+                            }
+                            Err(e) => {
+                                error!("群文件消息自动发送失败: {}", e);
+                                // 消息发送失败不影响文件上传结果
+                            }
                         }
                     }
                 }

@@ -3,761 +3,578 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>HuanVae Chat API 测试</title>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <style>
-    :root {
-      --bg-primary: #0d1117;
-      --bg-secondary: #161b22;
-      --bg-tertiary: #21262d;
-      --border-color: #30363d;
-      --text-primary: #c9d1d9;
-      --text-secondary: #8b949e;
-      --accent-blue: #58a6ff;
-      --accent-green: #3fb950;
-      --accent-red: #f85149;
-      --accent-orange: #d29922;
-      --accent-purple: #a371f7;
-      --accent-pink: #db61a2;
-      --shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-    }
-
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    body {
-      font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: linear-gradient(135deg, var(--bg-primary) 0%, #0a0e14 50%, var(--bg-primary) 100%);
-      min-height: 100vh;
-      color: var(--text-primary);
-      line-height: 1.6;
-    }
-
-    .container {
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 30px 20px;
-    }
-
-    header {
-      text-align: center;
-      margin-bottom: 40px;
-      padding: 30px;
-      background: linear-gradient(180deg, var(--bg-secondary) 0%, transparent 100%);
-      border-radius: 16px;
-      border: 1px solid var(--border-color);
-    }
-
-    header h1 {
-      font-size: 2.5rem;
-      font-weight: 700;
-      background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple), var(--accent-pink));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      margin-bottom: 10px;
-    }
-
-    header p {
-      color: var(--text-secondary);
-      font-size: 1rem;
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
-      gap: 24px;
-    }
-
-    .card {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 12px;
-      padding: 24px;
-      box-shadow: var(--shadow);
-      transition: all 0.3s ease;
-    }
-
-    .card:hover {
-      border-color: var(--accent-blue);
-      transform: translateY(-2px);
-    }
-
-    .card h2 {
-      font-size: 1.25rem;
-      font-weight: 600;
-      margin-bottom: 20px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .card h2 .icon {
-      font-size: 1.5rem;
-    }
-
-    .card h3 {
-      font-size: 1rem;
-      font-weight: 500;
-      color: var(--text-secondary);
-      margin: 20px 0 12px 0;
-      padding-top: 16px;
-      border-top: 1px solid var(--border-color);
-    }
-
-    .form-row {
-      display: flex;
-      gap: 12px;
-      margin-bottom: 12px;
-      align-items: center;
-    }
-
-    .form-row label {
-      min-width: 100px;
-      font-size: 0.875rem;
-      color: var(--text-secondary);
-    }
-
-    input, textarea, select {
-      flex: 1;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 10px 14px;
-      color: var(--text-primary);
-      font-family: inherit;
-      font-size: 0.875rem;
-      transition: all 0.2s ease;
-    }
-
-    input:focus, textarea:focus, select:focus {
-      outline: none;
-      border-color: var(--accent-blue);
-      box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
-    }
-
-    input::placeholder, textarea::placeholder {
-      color: var(--text-secondary);
-      opacity: 0.6;
-    }
-
-    button {
-      background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
-      color: white;
-      border: none;
-      border-radius: 8px;
-      padding: 10px 20px;
-      font-size: 0.875rem;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      white-space: nowrap;
-    }
-
-    button:hover {
-      transform: scale(1.02);
-      box-shadow: 0 4px 12px rgba(88, 166, 255, 0.3);
-    }
-
-    button:active {
-      transform: scale(0.98);
-    }
-
-    button.secondary {
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-color);
-    }
-
-    button.success {
-      background: linear-gradient(135deg, var(--accent-green), #238636);
-    }
-
-    button.danger {
-      background: linear-gradient(135deg, var(--accent-red), #a41e1e);
-    }
-
-    button.warning {
-      background: linear-gradient(135deg, var(--accent-orange), #9e6a00);
-    }
-
-    .btn-group {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin: 12px 0;
-    }
-
-    pre {
-      background: var(--bg-primary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 14px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.8rem;
-      overflow-x: auto;
-      max-height: 300px;
-      overflow-y: auto;
-      margin-top: 12px;
-      color: var(--text-secondary);
-    }
-
-    pre.success {
-      border-color: var(--accent-green);
-      background: rgba(63, 185, 80, 0.05);
-    }
-
-    pre.error {
-      border-color: var(--accent-red);
-      background: rgba(248, 81, 73, 0.05);
-    }
-
-    .status-bar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 12px 16px;
-      background: var(--bg-tertiary);
-      border-radius: 8px;
-      margin-bottom: 16px;
-      font-size: 0.875rem;
-    }
-
-    .status-dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: var(--accent-red);
-    }
-
-    .status-dot.online {
-      background: var(--accent-green);
-      animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-
-    .list-container {
-      max-height: 250px;
-      overflow-y: auto;
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      background: var(--bg-primary);
-    }
-
-    .list-item {
-      padding: 12px 16px;
-      border-bottom: 1px solid var(--border-color);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .list-item:last-child {
-      border-bottom: none;
-    }
-
-    .list-item:hover {
-      background: var(--bg-tertiary);
-    }
-
-    .list-item .info {
-      flex: 1;
-    }
-
-    .list-item .name {
-      font-weight: 500;
-      color: var(--text-primary);
-    }
-
-    .list-item .meta {
-      font-size: 0.75rem;
-      color: var(--text-secondary);
-      margin-top: 4px;
-    }
-
-    .list-item .actions {
-      display: flex;
-      gap: 6px;
-    }
-
-    .list-item button {
-      padding: 6px 12px;
-      font-size: 0.75rem;
-    }
-
-    .badge {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 12px;
-      font-size: 0.7rem;
-      font-weight: 500;
-    }
-
-    .badge.blue { background: rgba(88, 166, 255, 0.2); color: var(--accent-blue); }
-    .badge.green { background: rgba(63, 185, 80, 0.2); color: var(--accent-green); }
-    .badge.orange { background: rgba(210, 153, 34, 0.2); color: var(--accent-orange); }
-    .badge.purple { background: rgba(163, 113, 247, 0.2); color: var(--accent-purple); }
-
-    .message-list {
-      max-height: 400px;
-      overflow-y: auto;
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      background: var(--bg-primary);
-      padding: 12px;
-    }
-
-    .message-item {
-      margin-bottom: 12px;
-      padding: 12px;
-      border-radius: 8px;
-      max-width: 80%;
-    }
-
-    .message-item.sent {
-      background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
-      margin-left: auto;
-      color: white;
-    }
-
-    .message-item.received {
-      background: var(--bg-tertiary);
-    }
-
-    .message-header {
-      font-size: 0.75rem;
-      opacity: 0.7;
-      margin-bottom: 6px;
-    }
-
-    .message-content {
-      word-break: break-word;
-    }
-
-    .progress-bar {
-      width: 100%;
-      height: 8px;
-      background: var(--bg-tertiary);
-      border-radius: 4px;
-      overflow: hidden;
-      margin: 12px 0;
-    }
-
-    .progress-bar .fill {
-      height: 100%;
-      background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
-      transition: width 0.3s ease;
-      border-radius: 4px;
-    }
-
-    .file-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-      gap: 12px;
-      margin-top: 12px;
-    }
-
-    .file-card {
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 12px;
-      text-align: center;
-    }
-
-    .file-card .icon {
-      font-size: 2rem;
-      margin-bottom: 8px;
-    }
-
-    .file-card .name {
-      font-size: 0.8rem;
-      word-break: break-all;
-      margin-bottom: 4px;
-    }
-
-    .file-card .size {
-      font-size: 0.7rem;
-      color: var(--text-secondary);
-    }
-
-    .tabs {
-      display: flex;
-      gap: 4px;
-      background: var(--bg-tertiary);
-      padding: 4px;
-      border-radius: 8px;
-      margin-bottom: 16px;
-    }
-
-    .tab {
-      flex: 1;
-      padding: 10px;
-      border: none;
-      background: transparent;
-      color: var(--text-secondary);
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 0.875rem;
-      transition: all 0.2s ease;
-    }
-
-    .tab.active {
-      background: var(--bg-secondary);
-      color: var(--accent-blue);
-    }
-
-    .tab-content {
-      display: none;
-    }
-
-    .tab-content.active {
-      display: block;
-    }
-
-    .empty-state {
-      text-align: center;
-      padding: 40px 20px;
-      color: var(--text-secondary);
-    }
-
-    .empty-state .icon {
-      font-size: 3rem;
-      margin-bottom: 12px;
-      opacity: 0.5;
-    }
-
-    .checkbox-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    input[type="checkbox"] {
-      width: 18px;
-      height: 18px;
-      flex: none;
-    }
-
-    .toast {
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      padding: 12px 20px;
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      box-shadow: var(--shadow);
-      z-index: 1000;
-      animation: slideIn 0.3s ease;
-    }
-
-    .toast.success { border-color: var(--accent-green); }
-    .toast.error { border-color: var(--accent-red); }
-
-    @keyframes slideIn {
-      from { transform: translateX(100%); opacity: 0; }
-      to { transform: translateX(0); opacity: 1; }
-    }
-
-    @media (max-width: 768px) {
-      .grid {
-        grid-template-columns: 1fr;
-      }
-      
-      .form-row {
-        flex-direction: column;
-        align-items: stretch;
-      }
-      
-      .form-row label {
-        min-width: auto;
-      }
-    }
-  </style>
+  <title>HuanVae Chat</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>🚀 HuanVae Chat API</h1>
-      <p>完整功能测试界面 · 认证 · 好友 · 消息 · 文件存储</p>
-    </header>
+  <div class="app-container">
+    <!-- 左侧导航栏 -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="user-avatar" id="currentUserAvatar" onclick="showProfileModal()">
+          <span class="avatar-placeholder">👤</span>
+        </div>
+      </div>
+      
+      <nav class="sidebar-nav">
+        <button class="nav-btn active" data-panel="chats" onclick="switchPanel('chats')" title="聊天">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span class="nav-badge" id="unreadBadge" style="display: none;">0</span>
+        </button>
+        <button class="nav-btn" data-panel="contacts" onclick="switchPanel('contacts')" title="通讯录">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+        </button>
+        <button class="nav-btn" data-panel="groups" onclick="switchPanel('groups')" title="群聊">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+        </button>
+        <button class="nav-btn" data-panel="files" onclick="switchPanel('files')" title="文件">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+        </button>
+      </nav>
+      
+      <div class="sidebar-footer">
+        <button class="nav-btn" onclick="showSettingsModal()" title="设置">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
+    </aside>
 
-    <!-- 状态栏 -->
-    <div class="status-bar">
-      <div class="status-dot" id="statusDot"></div>
-      <span id="statusText">未登录</span>
-      <span style="margin-left: auto; color: var(--text-secondary);" id="userInfo"></span>
-    </div>
-
-    <div class="grid">
-      <!-- 认证模块 -->
-      <div class="card">
-        <h2><span class="icon">🔐</span> 认证系统</h2>
-        
-        <h3>用户注册</h3>
-        <div class="form-row">
-          <label>用户ID</label>
-          <input id="reg_user_id" type="text" placeholder="唯一用户标识" />
+    <!-- 会话/联系人列表区域 -->
+    <section class="list-panel">
+      <!-- 搜索栏 -->
+      <div class="list-header">
+        <div class="search-box">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/>
+            <path d="m21 21-4.35-4.35"/>
+          </svg>
+          <input type="text" id="searchInput" placeholder="搜索" oninput="handleSearch(this.value)">
         </div>
-        <div class="form-row">
-          <label>昵称</label>
-          <input id="reg_nickname" type="text" placeholder="显示昵称" />
-        </div>
-        <div class="form-row">
-          <label>密码</label>
-          <input id="reg_password" type="password" placeholder="至少6位" />
-        </div>
-        <div class="form-row">
-          <label>邮箱</label>
-          <input id="reg_email" type="email" placeholder="可选" />
-        </div>
-        <button onclick="register()" class="success">注册</button>
-        <pre id="regResult"></pre>
-
-        <h3>用户登录</h3>
-        <div class="form-row">
-          <label>用户ID</label>
-          <input id="login_user_id" type="text" placeholder="用户ID" />
-        </div>
-        <div class="form-row">
-          <label>密码</label>
-          <input id="login_password" type="password" placeholder="密码" />
-        </div>
-        <button onclick="login()">登录</button>
-        <button onclick="logout()" class="secondary">登出</button>
-        <button onclick="refreshToken()" class="warning">刷新Token</button>
-        <pre id="loginResult"></pre>
-
-        <h3>设备管理</h3>
-        <button onclick="listDevices()">获取设备列表</button>
-        <div class="list-container" id="devicesList" style="margin-top: 12px;"></div>
+        <button class="icon-btn" onclick="showAddMenu()" title="添加">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+        </button>
       </div>
 
-      <!-- 好友模块 -->
-      <div class="card">
-        <h2><span class="icon">👥</span> 好友系统</h2>
-        
-        <h3>发送好友请求</h3>
-        <div class="form-row">
-          <label>目标用户ID</label>
-          <input id="friend_target_id" type="text" placeholder="要添加的用户ID" />
-        </div>
-        <div class="form-row">
-          <label>申请理由</label>
-          <input id="friend_reason" type="text" placeholder="可选" />
-        </div>
-        <button onclick="submitFriendRequest()" class="success">发送请求</button>
-        <pre id="friendRequestResult"></pre>
-
-        <h3>待处理请求</h3>
-        <button onclick="listPendingRequests()">刷新</button>
-        <div class="list-container" id="pendingList" style="margin-top: 12px;"></div>
-
-        <h3>已发送请求</h3>
-        <button onclick="listSentRequests()">刷新</button>
-        <div class="list-container" id="sentList" style="margin-top: 12px;"></div>
-
-        <h3>好友列表</h3>
-        <button onclick="listFriends()">刷新</button>
-        <div class="list-container" id="friendsList" style="margin-top: 12px;"></div>
-      </div>
-
-      <!-- 消息模块 -->
-      <div class="card">
-        <h2><span class="icon">💬</span> 好友消息</h2>
-        
-        <h3>发送消息</h3>
-        <div class="form-row">
-          <label>接收者ID</label>
-          <input id="msg_receiver_id" type="text" placeholder="好友ID" />
-        </div>
-        <div class="form-row">
-          <label>消息类型</label>
-          <select id="msg_type" onchange="toggleFileUpload()">
-            <option value="text">文本</option>
-            <option value="image">图片</option>
-            <option value="video">视频</option>
-            <option value="file">文件</option>
-          </select>
-        </div>
-        <div class="form-row">
-          <label>内容</label>
-          <textarea id="msg_content" rows="2" placeholder="消息内容"></textarea>
-        </div>
-        
-        <!-- 文件上传区域（选择图片/视频/文件时显示） -->
-        <div id="file_upload_section" style="display: none; margin: 12px 0; padding: 12px; background: var(--bg-tertiary); border-radius: 8px;">
-          <div class="form-row">
-            <label>选择文件</label>
-            <input id="msg_file_input" type="file" />
-          </div>
-          <div class="progress-bar" id="msgUploadProgress" style="display: none;">
-            <div class="fill" id="msgUploadProgressFill" style="width: 0%;"></div>
-          </div>
-          <p id="msgUploadProgressText" style="font-size: 0.8rem; color: var(--text-secondary);"></p>
-        </div>
-        
-        <div class="btn-group">
-          <button onclick="sendMessage()" class="success">发送文本</button>
-          <button onclick="uploadAndSendFile()" class="success" id="btnUploadAndSend" style="display: none;">📎 上传并发送</button>
-        </div>
-        <pre id="sendMsgResult"></pre>
-
-        <h3>查看消息</h3>
-        <div class="form-row">
-          <label>好友ID</label>
-          <input id="chat_friend_id" type="text" placeholder="与谁的对话" />
-          <button onclick="loadMessages()">加载</button>
-        </div>
-        <div class="message-list" id="messagesList">
+      <!-- 聊天列表面板 -->
+      <div class="panel-content" id="panel-chats">
+        <div class="conversation-list" id="conversationList">
           <div class="empty-state">
-            <div class="icon">💭</div>
-            <p>输入好友ID查看消息</p>
+            <div class="empty-icon">💬</div>
+            <p>暂无会话</p>
+            <p class="empty-hint">添加好友开始聊天</p>
           </div>
         </div>
-
-        <h3>消息操作</h3>
-        <div class="form-row">
-          <label>消息UUID</label>
-          <input id="op_message_uuid" type="text" placeholder="消息UUID" />
-        </div>
-        <div class="btn-group">
-          <button onclick="deleteMessage()" class="danger">删除</button>
-          <button onclick="recallMessage()" class="warning">撤回</button>
-        </div>
-        <pre id="msgOpResult"></pre>
       </div>
 
-      <!-- 个人资料模块 -->
-      <div class="card">
-        <h2><span class="icon">👤</span> 个人资料</h2>
-        
-        <button onclick="loadProfile()">获取个人信息</button>
-        <pre id="profileResult"></pre>
-
-        <h3>更新资料</h3>
-        <div class="form-row">
-          <label>邮箱</label>
-          <input id="profile_email" type="email" placeholder="新邮箱" />
+      <!-- 通讯录面板 -->
+      <div class="panel-content" id="panel-contacts" style="display: none;">
+        <div class="panel-tabs">
+          <button class="panel-tab active" onclick="switchContactTab('friends')">好友</button>
+          <button class="panel-tab" onclick="switchContactTab('pending')">新朋友</button>
+          <button class="panel-tab" onclick="switchContactTab('sent')">已发送</button>
         </div>
-        <div class="form-row">
-          <label>签名</label>
-          <input id="profile_signature" type="text" placeholder="个性签名" />
+        <div class="contact-list" id="friendsList">
+          <div class="empty-state">
+            <div class="empty-icon">👥</div>
+            <p>暂无好友</p>
+          </div>
         </div>
-        <button onclick="updateProfile()">保存</button>
-
-        <h3>修改密码</h3>
-        <div class="form-row">
-          <label>旧密码</label>
-          <input id="old_password" type="password" placeholder="当前密码" />
-        </div>
-        <div class="form-row">
-          <label>新密码</label>
-          <input id="new_password" type="password" placeholder="新密码" />
-        </div>
-        <button onclick="changePassword()" class="warning">修改密码</button>
-
-        <h3>上传头像</h3>
-        <div class="form-row">
-          <input id="avatar_file" type="file" accept="image/*" />
-          <button onclick="uploadAvatar()">上传</button>
-        </div>
-        <pre id="avatarResult"></pre>
+        <div class="contact-list" id="pendingList" style="display: none;"></div>
+        <div class="contact-list" id="sentList" style="display: none;"></div>
       </div>
 
-      <!-- 文件存储模块 -->
-      <div class="card" style="grid-column: span 2;">
-        <h2><span class="icon">📁</span> 文件存储</h2>
-        
-        <div class="tabs">
-          <button class="tab active" onclick="switchTab('upload')">上传文件</button>
-          <button class="tab" onclick="switchTab('myfiles')">我的文件</button>
-          <button class="tab" onclick="switchTab('friendfile')">好友文件</button>
+      <!-- 群聊面板 -->
+      <div class="panel-content" id="panel-groups" style="display: none;">
+        <div class="panel-tabs">
+          <button class="panel-tab active" onclick="switchGroupTab('myGroups')">我的群聊</button>
+          <button class="panel-tab" onclick="switchGroupTab('invitations')">群邀请</button>
         </div>
-
-        <div class="tab-content active" id="tab-upload">
-          <h3>上传新文件</h3>
-          <div class="form-row">
-            <label>选择文件</label>
-            <input id="upload_file" type="file" />
+        <div class="group-list" id="myGroupsList">
+          <div class="empty-state">
+            <div class="empty-icon">👥</div>
+            <p>暂无群聊</p>
+            <button class="btn-primary" onclick="showCreateGroupModal()">创建群聊</button>
           </div>
-          <div class="form-row">
-            <label>文件类型</label>
-            <select id="upload_file_type">
-              <option value="user_image">用户图片</option>
-              <option value="user_video">用户视频</option>
-              <option value="user_document">用户文档</option>
-            </select>
-          </div>
-          <div class="form-row">
-            <label>存储位置</label>
-            <select id="upload_storage_location">
-              <option value="user_files">个人文件</option>
-              <option value="friend_messages">好友消息</option>
-            </select>
-          </div>
-          <div class="form-row" id="related_id_row" style="display: none;">
-            <label>好友ID</label>
-            <input id="upload_related_id" type="text" placeholder="选择好友消息时必填" />
-          </div>
-          <div class="checkbox-row">
-            <input type="checkbox" id="force_upload" />
-            <label for="force_upload">强制上传（跳过秒传）</label>
-          </div>
-          <button onclick="uploadFile()" class="success" style="margin-top: 12px;">开始上传</button>
-          
-          <div class="progress-bar" id="uploadProgress" style="display: none;">
-            <div class="fill" id="uploadProgressFill" style="width: 0%;"></div>
-          </div>
-          <p id="uploadProgressText" style="font-size: 0.8rem; color: var(--text-secondary);"></p>
-          <pre id="uploadResult"></pre>
         </div>
+        <div class="group-list" id="groupInvitationsList" style="display: none;"></div>
+      </div>
 
-        <div class="tab-content" id="tab-myfiles">
-          <h3>我的文件</h3>
-          <button onclick="listMyFiles()">刷新文件列表</button>
-          <div class="file-grid" id="myFilesList" style="margin-top: 12px;"></div>
-          <pre id="myFilesResult"></pre>
+      <!-- 文件面板 -->
+      <div class="panel-content" id="panel-files" style="display: none;">
+        <div class="panel-tabs">
+          <button class="panel-tab active" onclick="switchFileTab('myFiles')">我的文件</button>
+          <button class="panel-tab" onclick="switchFileTab('upload')">上传文件</button>
         </div>
-
-        <div class="tab-content" id="tab-friendfile">
-          <h3>好友文件预签名URL</h3>
-          <div class="form-row">
-            <label>文件UUID</label>
-            <input id="friend_file_uuid" type="text" placeholder="好友文件UUID" />
+        <div class="file-list" id="myFilesList">
+          <div class="empty-state">
+            <div class="empty-icon">📁</div>
+            <p>暂无文件</p>
           </div>
-          <div class="form-row">
-            <label>有效期</label>
-            <select id="friend_file_expires">
-              <option value="normal">普通（3小时）</option>
-              <option value="extended">扩展（自定义）</option>
-            </select>
+        </div>
+        <div class="upload-panel" id="uploadPanel" style="display: none;">
+          <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+            <input type="file" id="fileInput" style="display: none;" onchange="handleFileSelect(this.files)">
+            <div class="upload-icon">📤</div>
+            <p>点击或拖拽文件到此处上传</p>
+            <p class="upload-hint">支持图片、视频、文档，最大 500MB</p>
           </div>
-          <div class="form-row" id="extended_hours_row" style="display: none;">
-            <label>小时数</label>
-            <input id="extended_hours" type="number" value="24" min="3" max="168" />
-          </div>
-          <button onclick="getFriendFileUrl()">获取预签名URL</button>
-          <pre id="friendFileResult"></pre>
-          
-          <h3>文件预览</h3>
-          <div id="filePreview" style="margin-top: 12px; padding: 20px; background: var(--bg-primary); border-radius: 8px; text-align: center;">
-            <div class="empty-state">
-              <div class="icon">🖼️</div>
-              <p>获取预签名URL后可预览文件</p>
+          <div class="upload-options">
+            <div class="form-group">
+              <label>存储位置</label>
+              <select id="uploadLocation" onchange="toggleRelatedId()">
+                <option value="user_files">个人文件</option>
+                <option value="friend_messages">发送给好友</option>
+                <option value="group_files">发送到群聊</option>
+              </select>
+            </div>
+            <div class="form-group" id="relatedIdGroup" style="display: none;">
+              <label>选择目标</label>
+              <select id="uploadRelatedId"></select>
+            </div>
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="forceUpload">
+                <span>强制上传（跳过秒传）</span>
+              </label>
             </div>
           </div>
+          <div class="upload-progress" id="uploadProgress" style="display: none;">
+            <div class="progress-bar">
+              <div class="progress-fill" id="uploadProgressFill"></div>
+            </div>
+            <p class="progress-text" id="uploadProgressText">准备上传...</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 主聊天区域 -->
+    <main class="chat-panel" id="chatPanel">
+      <!-- 未选择聊天时的欢迎界面 -->
+      <div class="welcome-screen" id="welcomeScreen">
+        <div class="welcome-content">
+          <div class="welcome-logo">💬</div>
+          <h2>HuanVae Chat</h2>
+          <p>选择一个会话开始聊天</p>
+          <div class="quick-actions" id="quickActions" style="display: none;">
+            <button onclick="showAddFriendModal()">➕ 添加好友</button>
+            <button onclick="showCreateGroupModal()">👥 创建群聊</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 聊天界面 -->
+      <div class="chat-view" id="chatView" style="display: none;">
+        <!-- 聊天头部 -->
+        <header class="chat-header">
+          <div class="chat-info">
+            <div class="chat-avatar" id="chatAvatar">
+              <span class="avatar-placeholder">👤</span>
+            </div>
+            <div class="chat-meta">
+              <h3 id="chatName">聊天名称</h3>
+              <span class="chat-status" id="chatStatus"></span>
+            </div>
+          </div>
+          <div class="chat-actions">
+            <button class="icon-btn" onclick="toggleInfoPanel()" title="详情">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="16" x2="12" y2="12"/>
+                <line x1="12" y1="8" x2="12.01" y2="8"/>
+              </svg>
+            </button>
+            <button class="icon-btn" id="btnGroupNotice" onclick="showGroupNotices()" title="公告" style="display: none;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
+                <line x1="4" y1="22" x2="4" y2="15"/>
+              </svg>
+            </button>
+          </div>
+        </header>
+
+        <!-- 消息列表 -->
+        <div class="message-container" id="messageContainer">
+          <div class="message-list" id="messageList">
+            <div class="message-loading" id="messageLoading" style="display: none;">
+              <div class="loading-spinner"></div>
+              <span>加载消息中...</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 输入区域 -->
+        <footer class="chat-input-area">
+          <div class="input-toolbar">
+            <button class="tool-btn" onclick="document.getElementById('chatFileInput').click()" title="发送文件">
+              <input type="file" id="chatFileInput" style="display: none;" onchange="sendFileMessage(this.files)">
+              📎
+            </button>
+            <button class="tool-btn" onclick="showEmojiPicker()" title="表情">😊</button>
+          </div>
+          <div class="input-wrapper">
+            <textarea id="messageInput" placeholder="输入消息..." rows="1" 
+              onkeydown="handleInputKeydown(event)" oninput="autoResizeInput(this)"></textarea>
+          </div>
+          <button class="send-btn" onclick="sendMessage()" title="发送">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+          </button>
+        </footer>
+      </div>
+    </main>
+
+    <!-- 右侧信息面板 -->
+    <aside class="info-panel" id="infoPanel" style="display: none;">
+      <header class="info-header">
+        <h3 id="infoPanelTitle">详细信息</h3>
+        <button class="icon-btn" onclick="toggleInfoPanel()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </header>
+      <div class="info-content" id="infoPanelContent">
+        <!-- 动态填充 -->
+      </div>
+    </aside>
+  </div>
+
+  <!-- 登录/注册模态框 -->
+  <div class="modal" id="authModal">
+    <div class="modal-backdrop" onclick="closeModal('authModal')"></div>
+    <div class="modal-content auth-modal">
+      <div class="auth-header">
+        <h2>HuanVae Chat</h2>
+        <p>登录或注册开始聊天</p>
+      </div>
+      <div class="auth-tabs">
+        <button class="auth-tab active" onclick="switchAuthTab('login')">登录</button>
+        <button class="auth-tab" onclick="switchAuthTab('register')">注册</button>
+      </div>
+      
+      <form id="loginForm" class="auth-form" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label>用户ID</label>
+          <input type="text" id="loginUserId" required placeholder="请输入用户ID">
+        </div>
+        <div class="form-group">
+          <label>密码</label>
+          <input type="password" id="loginPassword" required placeholder="请输入密码">
+        </div>
+        <button type="submit" class="btn-primary btn-block">登录</button>
+      </form>
+      
+      <form id="registerForm" class="auth-form" style="display: none;" onsubmit="handleRegister(event)">
+        <div class="form-group">
+          <label>用户ID</label>
+          <input type="text" id="regUserId" required placeholder="唯一用户标识">
+        </div>
+        <div class="form-group">
+          <label>昵称</label>
+          <input type="text" id="regNickname" required placeholder="显示昵称">
+        </div>
+        <div class="form-group">
+          <label>密码</label>
+          <input type="password" id="regPassword" required placeholder="至少6位" minlength="6">
+        </div>
+        <div class="form-group">
+          <label>邮箱（可选）</label>
+          <input type="email" id="regEmail" placeholder="email@example.com">
+        </div>
+        <button type="submit" class="btn-primary btn-block">注册</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 添加好友模态框 -->
+  <div class="modal" id="addFriendModal" style="display: none;">
+    <div class="modal-backdrop" onclick="closeModal('addFriendModal')"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>添加好友</h3>
+        <button class="icon-btn" onclick="closeModal('addFriendModal')">✕</button>
+      </div>
+      <form onsubmit="submitFriendRequest(event)">
+        <div class="form-group">
+          <label>用户ID</label>
+          <input type="text" id="addFriendId" required placeholder="请输入对方用户ID">
+        </div>
+        <div class="form-group">
+          <label>验证消息</label>
+          <textarea id="addFriendMsg" rows="3" placeholder="请输入验证消息（可选）"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="closeModal('addFriendModal')">取消</button>
+          <button type="submit" class="btn-primary">发送请求</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 创建群聊模态框 -->
+  <div class="modal" id="createGroupModal" style="display: none;">
+    <div class="modal-backdrop" onclick="closeModal('createGroupModal')"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>创建群聊</h3>
+        <button class="icon-btn" onclick="closeModal('createGroupModal')">✕</button>
+      </div>
+      <form onsubmit="createGroup(event)">
+        <div class="form-group">
+          <label>群名称</label>
+          <input type="text" id="groupName" required placeholder="请输入群名称">
+        </div>
+        <div class="form-group">
+          <label>群描述</label>
+          <textarea id="groupDesc" rows="3" placeholder="请输入群描述（可选）"></textarea>
+        </div>
+        <div class="form-group">
+          <label>加群方式</label>
+          <select id="groupJoinMode">
+            <option value="open">开放加入</option>
+            <option value="approval_required">需要审批</option>
+            <option value="invite_only">仅邀请</option>
+            <option value="admin_invite_only">仅管理员邀请</option>
+            <option value="closed">禁止加入</option>
+          </select>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="closeModal('createGroupModal')">取消</button>
+          <button type="submit" class="btn-primary">创建</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 邀请成员模态框 -->
+  <div class="modal" id="inviteMemberModal" style="display: none;">
+    <div class="modal-backdrop" onclick="closeModal('inviteMemberModal')"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>邀请成员</h3>
+        <button class="icon-btn" onclick="closeModal('inviteMemberModal')">✕</button>
+      </div>
+      <form onsubmit="inviteToGroup(event)">
+        <div class="form-group">
+          <label>选择好友</label>
+          <div class="checkbox-list" id="inviteFriendsList"></div>
+        </div>
+        <div class="form-group">
+          <label>邀请消息</label>
+          <input type="text" id="inviteMessage" placeholder="可选">
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="closeModal('inviteMemberModal')">取消</button>
+          <button type="submit" class="btn-primary">邀请</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 群公告模态框 -->
+  <div class="modal" id="groupNoticeModal" style="display: none;">
+    <div class="modal-backdrop" onclick="closeModal('groupNoticeModal')"></div>
+    <div class="modal-content modal-lg">
+      <div class="modal-header">
+        <h3>群公告</h3>
+        <button class="icon-btn" onclick="closeModal('groupNoticeModal')">✕</button>
+      </div>
+      <div class="notice-list" id="noticeList"></div>
+      <div class="modal-actions" id="noticeActions" style="display: none;">
+        <button class="btn-primary" onclick="showPublishNoticeForm()">发布公告</button>
+      </div>
+      <form id="publishNoticeForm" style="display: none;" onsubmit="publishNotice(event)">
+        <div class="form-group">
+          <label>公告标题</label>
+          <input type="text" id="noticeTitle" required placeholder="请输入标题">
+        </div>
+        <div class="form-group">
+          <label>公告内容</label>
+          <textarea id="noticeContent" rows="4" required placeholder="请输入内容"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="noticePinned">
+            <span>置顶公告</span>
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="hidePublishNoticeForm()">取消</button>
+          <button type="submit" class="btn-primary">发布</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 生成邀请码模态框 -->
+  <div class="modal" id="inviteCodeModal" style="display: none;">
+    <div class="modal-backdrop" onclick="closeModal('inviteCodeModal')"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>生成邀请码</h3>
+        <button class="icon-btn" onclick="closeModal('inviteCodeModal')">✕</button>
+      </div>
+      <form onsubmit="generateInviteCode(event)">
+        <div class="form-group">
+          <label>最大使用次数</label>
+          <input type="number" id="inviteCodeMaxUses" value="10" min="1" max="1000">
+        </div>
+        <div class="form-group">
+          <label>有效期（小时）</label>
+          <input type="number" id="inviteCodeExpires" value="24" min="1" max="720">
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="closeModal('inviteCodeModal')">取消</button>
+          <button type="submit" class="btn-primary">生成</button>
+        </div>
+      </form>
+      <div id="generatedCodeResult" style="display: none;">
+        <div class="invite-code-display">
+          <p class="code-label">邀请码</p>
+          <p class="code-value" id="inviteCodeValue"></p>
+          <button class="btn-secondary" onclick="copyInviteCode()">复制</button>
         </div>
       </div>
     </div>
   </div>
+
+  <!-- 使用邀请码模态框 -->
+  <div class="modal" id="useInviteCodeModal" style="display: none;">
+    <div class="modal-backdrop" onclick="closeModal('useInviteCodeModal')"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>使用邀请码加入群聊</h3>
+        <button class="icon-btn" onclick="closeModal('useInviteCodeModal')">✕</button>
+      </div>
+      <form onsubmit="joinByInviteCode(event)">
+        <div class="form-group">
+          <label>邀请码</label>
+          <input type="text" id="joinInviteCode" required placeholder="请输入邀请码">
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="closeModal('useInviteCodeModal')">取消</button>
+          <button type="submit" class="btn-primary">加入</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 个人资料模态框 -->
+  <div class="modal" id="profileModal" style="display: none;">
+    <div class="modal-backdrop" onclick="closeModal('profileModal')"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>个人资料</h3>
+        <button class="icon-btn" onclick="closeModal('profileModal')">✕</button>
+      </div>
+      <div class="profile-header">
+        <div class="profile-avatar" id="profileAvatar">
+          <span class="avatar-placeholder">👤</span>
+        </div>
+        <input type="file" id="avatarInput" accept="image/*" style="display: none;" onchange="uploadAvatar(this.files)">
+        <button class="btn-secondary btn-sm" onclick="document.getElementById('avatarInput').click()">更换头像</button>
+      </div>
+      <form onsubmit="updateProfile(event)">
+        <div class="form-group">
+          <label>用户ID</label>
+          <input type="text" id="profileUserId" disabled>
+        </div>
+        <div class="form-group">
+          <label>昵称</label>
+          <input type="text" id="profileNickname" disabled>
+        </div>
+        <div class="form-group">
+          <label>邮箱</label>
+          <input type="email" id="profileEmail" placeholder="请输入邮箱">
+        </div>
+        <div class="form-group">
+          <label>个性签名</label>
+          <textarea id="profileSignature" rows="2" placeholder="请输入个性签名"></textarea>
+        </div>
+        <button type="submit" class="btn-primary btn-block">保存</button>
+      </form>
+      <hr>
+      <h4>修改密码</h4>
+      <form onsubmit="changePassword(event)">
+        <div class="form-group">
+          <label>旧密码</label>
+          <input type="password" id="oldPassword" required>
+        </div>
+        <div class="form-group">
+          <label>新密码</label>
+          <input type="password" id="newPassword" required minlength="6">
+        </div>
+        <button type="submit" class="btn-secondary btn-block">修改密码</button>
+      </form>
+      <hr>
+      <button class="btn-danger btn-block" onclick="logout()">退出登录</button>
+    </div>
+  </div>
+
+  <!-- 设置模态框 -->
+  <div class="modal" id="settingsModal" style="display: none;">
+    <div class="modal-backdrop" onclick="closeModal('settingsModal')"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>设置</h3>
+        <button class="icon-btn" onclick="closeModal('settingsModal')">✕</button>
+      </div>
+      <div class="settings-section">
+        <h4>设备管理</h4>
+        <button class="btn-secondary btn-block" onclick="showDevices()">查看登录设备</button>
+        <div id="devicesList" style="margin-top: 12px;"></div>
+      </div>
+      <div class="settings-section">
+        <h4>关于</h4>
+        <p class="text-muted">HuanVae Chat v1.0</p>
+        <p class="text-muted">基于 Rust + Axum 构建的即时通讯系统</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 添加菜单 -->
+  <div class="dropdown-menu" id="addMenu" style="display: none;">
+    <button class="dropdown-item" onclick="showAddFriendModal()">
+      <span class="dropdown-icon">👤</span>
+      添加好友
+    </button>
+    <button class="dropdown-item" onclick="showCreateGroupModal()">
+      <span class="dropdown-icon">👥</span>
+      创建群聊
+    </button>
+    <button class="dropdown-item" onclick="showUseInviteCodeModal()">
+      <span class="dropdown-icon">🔗</span>
+      使用邀请码
+    </button>
+  </div>
+
+  <!-- Toast 提示容器 -->
+  <div class="toast-container" id="toastContainer"></div>
 
   <script src="app.js"></script>
 </body>

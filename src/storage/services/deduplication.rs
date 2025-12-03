@@ -1,6 +1,7 @@
 use sqlx::PgPool;
 use std::sync::Arc;
 
+use crate::common::AppError;
 use crate::storage::client::S3Client;
 use crate::storage::models::{ExistingFileInfo, FileType, StorageLocation, PreviewSupport};
 use crate::storage::services::UuidMappingService;
@@ -34,7 +35,7 @@ impl DeduplicationService {
         file_size: i64,
         content_type: &str,
         preview_support: &PreviewSupport,
-    ) -> Result<Option<ExistingFileInfo>, anyhow::Error> {
+    ) -> Result<Option<ExistingFileInfo>, AppError> {
         // 查询是否存在相同哈希的文件
         if let Some(mapping) = self.uuid_mapping_service.find_by_hash(file_hash).await? {
             // 验证MinIO中物理文件确实存在

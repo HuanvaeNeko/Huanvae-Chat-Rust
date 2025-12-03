@@ -10,6 +10,8 @@ use crate::auth::{
 };
 use crate::friends::handlers::FriendsState;
 use crate::friends_messages::handlers::MessagesState;
+use crate::groups::handlers::GroupsState;
+use crate::group_messages::handlers::GroupMessagesState;
 use crate::profile::handlers::routes::ProfileAppState;
 use crate::storage::S3Client;
 use sqlx::PgPool;
@@ -137,6 +139,16 @@ impl AppState {
             s3_client: self.s3_client.clone(),
             blacklist_service: self.blacklist_service.clone(),
         }
+    }
+
+    /// 获取群聊模块状态
+    pub fn groups_state(&self) -> GroupsState {
+        GroupsState::new(self.db.clone())
+    }
+
+    /// 获取群消息模块状态
+    pub fn group_messages_state(&self) -> GroupMessagesState {
+        GroupMessagesState::new(self.db.clone())
     }
 }
 

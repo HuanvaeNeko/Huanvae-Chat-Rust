@@ -6,6 +6,8 @@ pub mod common;
 pub mod config;
 pub mod friends;
 pub mod friends_messages;
+pub mod groups;
+pub mod group_messages;
 pub mod profile;
 pub mod storage;
 
@@ -13,9 +15,4 @@ pub mod storage;
 pub use app_state::AppState;
 pub use common::{generate_conversation_uuid, ApiResponse, AppError};
 pub use config::{get_config, message_config, storage_config, token_config, AppConfig};
-
-// 可以在这里添加其他模块
-// pub mod chat;
-// pub mod group;
-// pub mod file;
 

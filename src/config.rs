@@ -271,8 +271,10 @@ impl CorsConfig {
 /// MinIO/S3 存储服务配置
 #[derive(Clone, Debug)]
 pub struct MinioConfig {
-    /// MinIO 服务端点
+    /// MinIO 服务端点（内部操作用）
     pub endpoint: String,
+    /// 预签名URL端点（签名计算用，通过Nginx代理访问）
+    pub presign_endpoint: String,
     /// 访问密钥
     pub access_key: String,
     /// 秘密密钥
@@ -289,6 +291,7 @@ impl Default for MinioConfig {
     fn default() -> Self {
         Self {
             endpoint: "http://localhost:9000".to_string(),
+            presign_endpoint: "http://localhost:9000".to_string(),
             access_key: "minioadmin".to_string(),
             secret_key: "minioadmin123".to_string(),
             bucket_avatars: "avatars".to_string(),
@@ -301,9 +304,13 @@ impl Default for MinioConfig {
 impl MinioConfig {
     /// 从环境变量加载配置
     pub fn from_env() -> Result<Self, String> {
+        let endpoint = env::var("MINIO_ENDPOINT")
+            .map_err(|_| "MINIO_ENDPOINT not set".to_string())?;
+        
         Ok(Self {
-            endpoint: env::var("MINIO_ENDPOINT")
-                .map_err(|_| "MINIO_ENDPOINT not set".to_string())?,
+            presign_endpoint: env::var("MINIO_PRESIGN_ENDPOINT")
+                .unwrap_or_else(|_| endpoint.clone()),
+            endpoint,
             access_key: env::var("MINIO_ACCESS_KEY")
                 .map_err(|_| "MINIO_ACCESS_KEY not set".to_string())?,
             secret_key: env::var("MINIO_SECRET_KEY")
