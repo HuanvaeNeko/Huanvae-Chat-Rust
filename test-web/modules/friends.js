@@ -2,7 +2,7 @@
  * 好友功能模块（简化版）
  */
 
-import { state, getAuthHeaders } from './state.js';
+import { state, getAuthHeaders, claimsFromToken } from './state.js';
 import { $, pretty } from './utils.js';
 
 // 提交好友请求
@@ -12,9 +12,24 @@ export async function submitFriendRequest() {
     return;
   }
   
+  // 验证 Token 是否有效
+  const claims = claimsFromToken();
+  if (!claims || !claims.sub) {
+    $('submitResFmt').textContent = 'Token 无效或已过期，请重新登录';
+    return;
+  }
+  
+  // 验证目标用户 ID
+  const targetUserId = $('req_target_user_id').value.trim();
+  if (!targetUserId) {
+    $('submitResFmt').textContent = '请输入目标用户ID';
+    return;
+  }
+  
   const body = {
-    target_user_id: $('req_target_user_id').value.trim(),
-    request_message: $('req_reason').value.trim() || undefined,
+    user_id: claims.sub,  // 后端需要这个字段
+    target_user_id: targetUserId,
+    reason: $('req_reason').value.trim() || undefined,  // 修正字段名
     request_time: $('req_request_time').value.trim() || new Date().toISOString(),
   };
   
@@ -24,7 +39,17 @@ export async function submitFriendRequest() {
       headers: getAuthHeaders(),
       body: JSON.stringify(body),
     });
-    const data = await res.json();
+    
+    // 处理可能的非 JSON 响应
+    const contentType = res.headers.get('content-type') || '';
+    let data;
+    if (contentType.includes('application/json')) {
+      data = await res.json();
+    } else {
+      const text = await res.text();
+      data = { error: text };
+    }
+    
     $('submitResFmt').textContent = pretty(data);
   } catch (err) {
     $('submitResFmt').textContent = String(err);

@@ -253,7 +253,7 @@ const uploadLargeFile = async (file) => {
 }
 ```
 
-**Response (秒传):**
+**Response (秒传 - 个人文件):**
 ```json
 {
   "mode": "one_time_token",
@@ -268,6 +268,28 @@ const uploadLargeFile = async (file) => {
 }
 ```
 
+**Response (秒传 - 好友文件，自动发送消息):**
+```json
+{
+  "mode": "one_time_token",
+  "preview_support": "inline_preview",
+  "upload_token": null,
+  "upload_url": null,
+  "expires_in": null,
+  "file_key": "conv-user1-user2/images/timestamp_hash_filename.jpg",
+  "max_file_size": 0,
+  "instant_upload": true,
+  "existing_file_url": "http://localhost:8080/api/storage/file/{uuid}",
+  "message_uuid": "81e2705b-7c9b-44f5-af92-2b654c850d11",
+  "message_send_time": "2025-12-03T06:36:51.382515670+00:00"
+}
+```
+
+**好友文件秒传说明**：
+- 当 `storage_location` 为 `friend_messages` 且触发秒传时，自动在聊天记录中插入文件消息
+- 消息内容格式：`[图片] 文件名`、`[视频] 文件名`、`[文件] 文件名`
+- 返回的 `message_uuid` 和 `message_send_time` 可用于前端更新聊天界面
+
 ### POST /api/storage/upload/direct?token={token}
 
 直接上传文件（Token验证，无需access_token）
@@ -275,7 +297,7 @@ const uploadLargeFile = async (file) => {
 **Request:** multipart/form-data
 - `file`: 文件数据
 
-**Response:**
+**Response (个人文件):**
 ```json
 {
   "file_url": "http://localhost:8080/api/storage/file/{uuid}",
@@ -285,6 +307,25 @@ const uploadLargeFile = async (file) => {
   "preview_support": "inline_preview"
 }
 ```
+
+**Response (好友文件 - 自动插入消息):**
+```json
+{
+  "file_url": "http://localhost:8080/api/storage/file/{uuid}",
+  "file_key": "conv-user1-user2/images/...",
+  "file_size": 1048576,
+  "content_type": "image/jpeg",
+  "preview_support": "inline_preview",
+  "message_uuid": "e29469f7-0bcd-4331-aacf-26c71d15e737",
+  "message_send_time": "2025-12-03T06:00:00Z"
+}
+```
+
+**好友文件自动消息说明**：
+- 当 `storage_location` 为 `friend_messages` 时，上传完成后自动在聊天记录中插入文件消息
+- 消息类型根据文件类型自动判断：`image`、`video` 或 `file`
+- 消息内容格式：`[图片] 文件名`、`[视频] 文件名`、`[文件] 文件名`
+- 返回的 `message_uuid` 和 `message_send_time` 可用于前端更新聊天界面
 
 ### POST /api/storage/file/{uuid}/presigned-url
 

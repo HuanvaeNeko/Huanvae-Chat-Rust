@@ -53,6 +53,23 @@ export function getAuthHeaders() {
   };
 }
 
+// 解码 JWT Token
+export function decodeJwt(token) {
+  try {
+    const [, payload] = token.split('.');
+    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+// 从 Token 获取 claims
+export function claimsFromToken() {
+  const c = decodeJwt(state.accessToken);
+  return c || {};
+}
+
 // 缓存预签名 URL
 export function cachePresignedUrl(uuid, url, expiresAt) {
   state.presignedUrls[uuid] = { url, expiresAt, cachedAt: new Date().toISOString() };

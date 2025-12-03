@@ -3,312 +3,762 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Auth 测试页</title>
-  <link rel="stylesheet" href="styles.css" />
+  <title>HuanVae Chat API 测试</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #0d1117;
+      --bg-secondary: #161b22;
+      --bg-tertiary: #21262d;
+      --border-color: #30363d;
+      --text-primary: #c9d1d9;
+      --text-secondary: #8b949e;
+      --accent-blue: #58a6ff;
+      --accent-green: #3fb950;
+      --accent-red: #f85149;
+      --accent-orange: #d29922;
+      --accent-purple: #a371f7;
+      --accent-pink: #db61a2;
+      --shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: linear-gradient(135deg, var(--bg-primary) 0%, #0a0e14 50%, var(--bg-primary) 100%);
+      min-height: 100vh;
+      color: var(--text-primary);
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 30px 20px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 40px;
+      padding: 30px;
+      background: linear-gradient(180deg, var(--bg-secondary) 0%, transparent 100%);
+      border-radius: 16px;
+      border: 1px solid var(--border-color);
+    }
+
+    header h1 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple), var(--accent-pink));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 10px;
+    }
+
+    header p {
+      color: var(--text-secondary);
+      font-size: 1rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+      gap: 24px;
+    }
+
+    .card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: var(--shadow);
+      transition: all 0.3s ease;
+    }
+
+    .card:hover {
+      border-color: var(--accent-blue);
+      transform: translateY(-2px);
+    }
+
+    .card h2 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .card h2 .icon {
+      font-size: 1.5rem;
+    }
+
+    .card h3 {
+      font-size: 1rem;
+      font-weight: 500;
+      color: var(--text-secondary);
+      margin: 20px 0 12px 0;
+      padding-top: 16px;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .form-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 12px;
+      align-items: center;
+    }
+
+    .form-row label {
+      min-width: 100px;
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+    }
+
+    input, textarea, select {
+      flex: 1;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: var(--text-primary);
+      font-family: inherit;
+      font-size: 0.875rem;
+      transition: all 0.2s ease;
+    }
+
+    input:focus, textarea:focus, select:focus {
+      outline: none;
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+    }
+
+    input::placeholder, textarea::placeholder {
+      color: var(--text-secondary);
+      opacity: 0.6;
+    }
+
+    button {
+      background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 20px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+
+    button:hover {
+      transform: scale(1.02);
+      box-shadow: 0 4px 12px rgba(88, 166, 255, 0.3);
+    }
+
+    button:active {
+      transform: scale(0.98);
+    }
+
+    button.secondary {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-color);
+    }
+
+    button.success {
+      background: linear-gradient(135deg, var(--accent-green), #238636);
+    }
+
+    button.danger {
+      background: linear-gradient(135deg, var(--accent-red), #a41e1e);
+    }
+
+    button.warning {
+      background: linear-gradient(135deg, var(--accent-orange), #9e6a00);
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 12px 0;
+    }
+
+    pre {
+      background: var(--bg-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      overflow-x: auto;
+      max-height: 300px;
+      overflow-y: auto;
+      margin-top: 12px;
+      color: var(--text-secondary);
+    }
+
+    pre.success {
+      border-color: var(--accent-green);
+      background: rgba(63, 185, 80, 0.05);
+    }
+
+    pre.error {
+      border-color: var(--accent-red);
+      background: rgba(248, 81, 73, 0.05);
+    }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      background: var(--bg-tertiary);
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-size: 0.875rem;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent-red);
+    }
+
+    .status-dot.online {
+      background: var(--accent-green);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .list-container {
+      max-height: 250px;
+      overflow-y: auto;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      background: var(--bg-primary);
+    }
+
+    .list-item {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .list-item:last-child {
+      border-bottom: none;
+    }
+
+    .list-item:hover {
+      background: var(--bg-tertiary);
+    }
+
+    .list-item .info {
+      flex: 1;
+    }
+
+    .list-item .name {
+      font-weight: 500;
+      color: var(--text-primary);
+    }
+
+    .list-item .meta {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      margin-top: 4px;
+    }
+
+    .list-item .actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    .list-item button {
+      padding: 6px 12px;
+      font-size: 0.75rem;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 0.7rem;
+      font-weight: 500;
+    }
+
+    .badge.blue { background: rgba(88, 166, 255, 0.2); color: var(--accent-blue); }
+    .badge.green { background: rgba(63, 185, 80, 0.2); color: var(--accent-green); }
+    .badge.orange { background: rgba(210, 153, 34, 0.2); color: var(--accent-orange); }
+    .badge.purple { background: rgba(163, 113, 247, 0.2); color: var(--accent-purple); }
+
+    .message-list {
+      max-height: 400px;
+      overflow-y: auto;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      background: var(--bg-primary);
+      padding: 12px;
+    }
+
+    .message-item {
+      margin-bottom: 12px;
+      padding: 12px;
+      border-radius: 8px;
+      max-width: 80%;
+    }
+
+    .message-item.sent {
+      background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+      margin-left: auto;
+      color: white;
+    }
+
+    .message-item.received {
+      background: var(--bg-tertiary);
+    }
+
+    .message-header {
+      font-size: 0.75rem;
+      opacity: 0.7;
+      margin-bottom: 6px;
+    }
+
+    .message-content {
+      word-break: break-word;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 8px;
+      background: var(--bg-tertiary);
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 12px 0;
+    }
+
+    .progress-bar .fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
+      transition: width 0.3s ease;
+      border-radius: 4px;
+    }
+
+    .file-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .file-card {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+    }
+
+    .file-card .icon {
+      font-size: 2rem;
+      margin-bottom: 8px;
+    }
+
+    .file-card .name {
+      font-size: 0.8rem;
+      word-break: break-all;
+      margin-bottom: 4px;
+    }
+
+    .file-card .size {
+      font-size: 0.7rem;
+      color: var(--text-secondary);
+    }
+
+    .tabs {
+      display: flex;
+      gap: 4px;
+      background: var(--bg-tertiary);
+      padding: 4px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+
+    .tab {
+      flex: 1;
+      padding: 10px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.875rem;
+      transition: all 0.2s ease;
+    }
+
+    .tab.active {
+      background: var(--bg-secondary);
+      color: var(--accent-blue);
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-secondary);
+    }
+
+    .empty-state .icon {
+      font-size: 3rem;
+      margin-bottom: 12px;
+      opacity: 0.5;
+    }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      flex: none;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      padding: 12px 20px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      z-index: 1000;
+      animation: slideIn 0.3s ease;
+    }
+
+    .toast.success { border-color: var(--accent-green); }
+    .toast.error { border-color: var(--accent-red); }
+
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    @media (max-width: 768px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+      
+      .form-row {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      
+      .form-row label {
+        min-width: auto;
+      }
+    }
+  </style>
 </head>
 <body>
   <div class="container">
-    <h1>认证功能测试</h1>
+    <header>
+      <h1>🚀 HuanVae Chat API</h1>
+      <p>完整功能测试界面 · 认证 · 好友 · 消息 · 文件存储</p>
+    </header>
 
-    <section class="card">
-      <h2>后端设置</h2>
-      <div class="row">
-        <label for="apiBase">API 基地址</label>
-        <input id="apiBase" type="text" placeholder="http://localhost:8080/api/auth" />
-        <button id="saveBase">保存</button>
-      </div>
-      <div class="row">
-        <label for="friendsApiBase">Friends API 基地址</label>
-        <input id="friendsApiBase" type="text" placeholder="http://localhost:8080/api/friends" />
-        <button id="saveFriendsBase">保存</button>
-      </div>
-      <div class="row">
-        <label for="messagesApiBase">Messages API 基地址</label>
-        <input id="messagesApiBase" type="text" placeholder="http://localhost:8080/api/messages" />
-        <button id="saveMessagesBase">保存</button>
-      </div>
-      <div class="row">
-        <label for="storageApiBase">Storage API 基地址</label>
-        <input id="storageApiBase" type="text" placeholder="http://localhost:8080/api/storage" />
-        <button id="saveStorageBase">保存</button>
-      </div>
-      <small>仅前端配置，未修改后端</small>
-    </section>
+    <!-- 状态栏 -->
+    <div class="status-bar">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">未登录</span>
+      <span style="margin-left: auto; color: var(--text-secondary);" id="userInfo"></span>
+    </div>
 
-    <section class="card">
-      <h2>注册</h2>
-      <div class="row"><label>用户ID</label><input id="reg_user_id" type="text" /></div>
-      <div class="row"><label>昵称</label><input id="reg_nickname" type="text" /></div>
-      <div class="row"><label>邮箱（可选）</label><input id="reg_email" type="email" /></div>
-      <div class="row"><label>密码</label><input id="reg_password" type="password" /></div>
-      <button id="btnRegister">注册</button>
-      <pre id="regResult" class="result"></pre>
-    </section>
-
-    <section class="card">
-      <h2>登录</h2>
-      <div class="row"><label>用户ID</label><input id="login_user_id" type="text" /></div>
-      <div class="row"><label>密码</label><input id="login_password" type="password" /></div>
-      <div class="row"><label>设备信息（可选）</label><input id="login_device_info" type="text" placeholder="Web" /></div>
-      <div class="row"><label>MAC地址（可选）</label><input id="login_mac" type="text" placeholder="00:00:00:00:00:00" /></div>
-      <button id="btnLogin">登录</button>
-      <pre id="loginResult" class="result"></pre>
-    </section>
-
-    <section class="card">
-      <h2>个人信息</h2>
-      <div class="row">
-        <button id="btnShowProfile">从 Access Token 解析并显示</button>
-        <button id="btnRefreshToken">刷新 Access Token</button>
-      </div>
-      <pre id="profile" class="result"></pre>
-    </section>
-
-    <section class="card">
-      <h2>设备管理</h2>
-      <div class="row">
-        <button id="btnListDevices">获取设备列表</button>
-      </div>
-      <div id="devices"></div>
-      <pre id="deviceResult" class="result"></pre>
-    </section>
-
-    <section class="card">
-      <h2>好友功能</h2>
-      <div class="row">
-        <label>目标用户ID</label>
-        <input id="req_target_user_id" type="text" />
-      </div>
-      <div class="row">
-        <label>申请原因（可选）</label>
-        <input id="req_reason" type="text" />
-      </div>
-      <div class="row">
-        <label>申请时间</label>
-        <input id="req_request_time" type="text" placeholder="ISO 时间，如 2025-11-18T12:00:00.000Z" />
-      </div>
-      <div class="row">
-        <button id="btnSubmitFriend">发起好友申请</button>
-      </div>
-      <pre id="submitReqFmt" class="result"></pre>
-      <pre id="submitResFmt" class="result"></pre>
-
-      <hr />
-
-      <div class="row">
-        <button id="btnListPending">获取待通过申请</button>
-      </div>
-      <div id="pendingList"></div>
-      <pre id="pendingReqFmt" class="result"></pre>
-      <pre id="pendingResFmt" class="result"></pre>
-
-      <hr />
-
-      <div class="row">
-        <button id="btnListSent">获取发出申请</button>
-      </div>
-      <div id="sentList"></div>
-      <pre id="sentReqFmt" class="result"></pre>
-      <pre id="sentResFmt" class="result"></pre>
-
-      <hr />
-
-      <div class="row">
-        <button id="btnListFriends">获取好友列表</button>
-      </div>
-      <div id="friendsList"></div>
-      <pre id="friendsReqFmt" class="result"></pre>
-      <pre id="friendsResFmt" class="result"></pre>
-
-      <hr />
-
-      <div class="row">
-        <label>直接删除好友ID</label>
-        <input id="remove_friend_id" type="text" />
-        <input id="remove_friend_reason" type="text" class="inline-input" placeholder="删除原因（可选）" />
-        <button id="btnRemoveFriendDirect">删除好友</button>
-      </div>
-      <pre id="removeReqFmt" class="result"></pre>
-      <pre id="removeResFmt" class="result"></pre>
-    </section>
-
-    <section class="card">
-      <h2>好友消息功能</h2>
-      
-      <h3>发送消息</h3>
-      <div class="row">
-        <label>接收者ID</label>
-        <input id="msg_receiver_id" type="text" placeholder="好友的用户ID" />
-      </div>
-      <div class="row">
-        <label>消息类型</label>
-        <select id="msg_type">
-          <option value="text">文本 (text)</option>
-          <option value="image">图片 (image)</option>
-          <option value="video">视频 (video)</option>
-          <option value="file">文件 (file)</option>
-        </select>
-      </div>
-      <div class="row">
-        <label>消息内容</label>
-        <textarea id="msg_content" rows="3" placeholder="输入消息内容"></textarea>
-      </div>
-      <div class="row">
-        <label>文件URL（可选）</label>
-        <input id="msg_file_url" type="text" placeholder="仅媒体消息时填写" />
-      </div>
-      <div class="row">
-        <label>文件大小（字节，可选）</label>
-        <input id="msg_file_size" type="number" placeholder="1024000" />
-      </div>
-      <div class="row">
-        <button id="btnSendMessage">发送消息</button>
-      </div>
-      <pre id="msgSendReqFmt" class="result"></pre>
-      <pre id="msgSendResFmt" class="result"></pre>
-
-      <hr />
-
-      <h3>获取消息列表</h3>
-      <div class="row">
-        <label>好友ID</label>
-        <input id="msg_friend_id" type="text" placeholder="查看与该好友的消息" />
-      </div>
-      <div class="row">
-        <label>起始消息UUID（可选）</label>
-        <input id="msg_before_uuid" type="text" placeholder="分页查询，从此消息之前查询" />
-      </div>
-      <div class="row">
-        <label>查询数量</label>
-        <input id="msg_limit" type="number" value="50" placeholder="默认50，最大500" />
-      </div>
-      <div class="row">
-        <button id="btnGetMessages">获取消息列表</button>
-      </div>
-      <div id="messagesList" style="max-height: 500px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; margin: 10px 0;"></div>
-      <pre id="msgGetReqFmt" class="result"></pre>
-      <pre id="msgGetResFmt" class="result"></pre>
-
-      <hr />
-
-      <h3>删除消息</h3>
-      <div class="row">
-        <label>消息UUID</label>
-        <input id="delete_message_uuid" type="text" placeholder="要删除的消息UUID" />
-        <button id="btnDeleteMessage">删除消息（软删除）</button>
-      </div>
-      <pre id="msgDeleteReqFmt" class="result"></pre>
-      <pre id="msgDeleteResFmt" class="result"></pre>
-
-      <hr />
-
-      <h3>撤回消息</h3>
-      <div class="row">
-        <label>消息UUID</label>
-        <input id="recall_message_uuid" type="text" placeholder="要撤回的消息UUID（2分钟内）" />
-        <button id="btnRecallMessage">撤回消息</button>
-      </div>
-      <pre id="msgRecallReqFmt" class="result"></pre>
-      <pre id="msgRecallResFmt" class="result"></pre>
-    </section>
-
-    <section class="card">
-      <h2>文件存储功能</h2>
-      
-      <h3>上传文件</h3>
-      <div class="row">
-        <label>选择文件</label>
-        <input id="file_input" type="file" />
-      </div>
-      <div class="row">
-        <label>文件类型</label>
-        <select id="file_type">
-          <option value="user_image">用户图片 (< 100MB)</option>
-          <option value="user_video">用户视频 (< 15GB)</option>
-          <option value="user_document">用户文档 (< 15GB)</option>
-        </select>
-      </div>
-      <div class="row">
-        <label>存储位置</label>
-        <select id="storage_location">
-          <option value="user_files">用户文件</option>
-          <option value="friend_messages">好友消息</option>
-        </select>
-      </div>
-      <div class="row">
-        <label>关联ID（可选）</label>
-        <input id="related_id" type="text" placeholder="好友ID或群ID" />
-      </div>
-      <div class="row">
-        <label>
-          <input id="force_upload" type="checkbox" />
-          强制上传（跳过秒传）
-        </label>
-      </div>
-      <div class="row">
-        <button id="btnUploadFile">开始上传</button>
-      </div>
-      <div id="uploadProgress" style="display: none; margin: 10px 0;">
-        <div style="background: #e0e0e0; height: 20px; border-radius: 10px;">
-          <div id="progressBar" style="background: #4caf50; height: 100%; border-radius: 10px; width: 0%; transition: width 0.3s;"></div>
+    <div class="grid">
+      <!-- 认证模块 -->
+      <div class="card">
+        <h2><span class="icon">🔐</span> 认证系统</h2>
+        
+        <h3>用户注册</h3>
+        <div class="form-row">
+          <label>用户ID</label>
+          <input id="reg_user_id" type="text" placeholder="唯一用户标识" />
         </div>
-        <small id="progressText">准备中...</small>
-      </div>
-      <pre id="fileUploadReqFmt" class="result"></pre>
-      <pre id="fileUploadResFmt" class="result"></pre>
+        <div class="form-row">
+          <label>昵称</label>
+          <input id="reg_nickname" type="text" placeholder="显示昵称" />
+        </div>
+        <div class="form-row">
+          <label>密码</label>
+          <input id="reg_password" type="password" placeholder="至少6位" />
+        </div>
+        <div class="form-row">
+          <label>邮箱</label>
+          <input id="reg_email" type="email" placeholder="可选" />
+        </div>
+        <button onclick="register()" class="success">注册</button>
+        <pre id="regResult"></pre>
 
-      <hr />
+        <h3>用户登录</h3>
+        <div class="form-row">
+          <label>用户ID</label>
+          <input id="login_user_id" type="text" placeholder="用户ID" />
+        </div>
+        <div class="form-row">
+          <label>密码</label>
+          <input id="login_password" type="password" placeholder="密码" />
+        </div>
+        <button onclick="login()">登录</button>
+        <button onclick="logout()" class="secondary">登出</button>
+        <button onclick="refreshToken()" class="warning">刷新Token</button>
+        <pre id="loginResult"></pre>
 
-      <h3>已上传文件列表（本地记录）</h3>
-      <div id="uploadedFilesList" style="max-height: 300px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; margin: 10px 0;"></div>
-      
-      <hr />
-      
-      <h3>⭐ 查询个人文件列表（服务器）</h3>
-      <div class="row">
-        <label>页码</label>
-        <input id="fileListPage" type="number" value="1" min="1" style="width: 80px;" />
-        <label>每页数量</label>
-        <input id="fileListLimit" type="number" value="20" min="1" max="100" style="width: 80px;" />
+        <h3>设备管理</h3>
+        <button onclick="listDevices()">获取设备列表</button>
+        <div class="list-container" id="devicesList" style="margin-top: 12px;"></div>
       </div>
-      <div class="row">
-        <label>排序字段</label>
-        <select id="fileListSortBy">
-          <option value="created_at">创建时间</option>
-          <option value="file_size">文件大小</option>
-        </select>
-        <label>排序方向</label>
-        <select id="fileListSortOrder">
-          <option value="desc">降序</option>
-          <option value="asc">升序</option>
-        </select>
-        <button id="btnListFiles">查询文件列表</button>
-      </div>
-      <div id="fileListDisplay" style="max-height: 400px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; margin: 10px 0;"></div>
-      <pre id="fileListResFmt" class="result"></pre>
-      
-      <hr />
-      
-      <h3>文件预览</h3>
-      <div class="row">
-        <label>文件URL</label>
-        <input id="preview_url" type="text" placeholder="粘贴文件URL进行预览" style="flex: 3;" />
-        <button id="btnPreviewFile">预览</button>
-      </div>
-      <div id="filePreview" style="margin: 20px 0; min-height: 200px; border: 1px solid #ddd; padding: 10px; text-align: center; background: #f9f9f9;">
-        <p style="color: #999;">文件预览区域</p>
-      </div>
-    </section>
 
-    <section class="card">
-      <h2>本地状态</h2>
-      <div class="row">
-        <button id="btnClear">清空本地 Token</button>
+      <!-- 好友模块 -->
+      <div class="card">
+        <h2><span class="icon">👥</span> 好友系统</h2>
+        
+        <h3>发送好友请求</h3>
+        <div class="form-row">
+          <label>目标用户ID</label>
+          <input id="friend_target_id" type="text" placeholder="要添加的用户ID" />
+        </div>
+        <div class="form-row">
+          <label>申请理由</label>
+          <input id="friend_reason" type="text" placeholder="可选" />
+        </div>
+        <button onclick="submitFriendRequest()" class="success">发送请求</button>
+        <pre id="friendRequestResult"></pre>
+
+        <h3>待处理请求</h3>
+        <button onclick="listPendingRequests()">刷新</button>
+        <div class="list-container" id="pendingList" style="margin-top: 12px;"></div>
+
+        <h3>已发送请求</h3>
+        <button onclick="listSentRequests()">刷新</button>
+        <div class="list-container" id="sentList" style="margin-top: 12px;"></div>
+
+        <h3>好友列表</h3>
+        <button onclick="listFriends()">刷新</button>
+        <div class="list-container" id="friendsList" style="margin-top: 12px;"></div>
       </div>
-      <pre id="localState" class="result"></pre>
-    </section>
+
+      <!-- 消息模块 -->
+      <div class="card">
+        <h2><span class="icon">💬</span> 好友消息</h2>
+        
+        <h3>发送消息</h3>
+        <div class="form-row">
+          <label>接收者ID</label>
+          <input id="msg_receiver_id" type="text" placeholder="好友ID" />
+        </div>
+        <div class="form-row">
+          <label>消息类型</label>
+          <select id="msg_type" onchange="toggleFileUpload()">
+            <option value="text">文本</option>
+            <option value="image">图片</option>
+            <option value="video">视频</option>
+            <option value="file">文件</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>内容</label>
+          <textarea id="msg_content" rows="2" placeholder="消息内容"></textarea>
+        </div>
+        
+        <!-- 文件上传区域（选择图片/视频/文件时显示） -->
+        <div id="file_upload_section" style="display: none; margin: 12px 0; padding: 12px; background: var(--bg-tertiary); border-radius: 8px;">
+          <div class="form-row">
+            <label>选择文件</label>
+            <input id="msg_file_input" type="file" />
+          </div>
+          <div class="progress-bar" id="msgUploadProgress" style="display: none;">
+            <div class="fill" id="msgUploadProgressFill" style="width: 0%;"></div>
+          </div>
+          <p id="msgUploadProgressText" style="font-size: 0.8rem; color: var(--text-secondary);"></p>
+        </div>
+        
+        <div class="btn-group">
+          <button onclick="sendMessage()" class="success">发送文本</button>
+          <button onclick="uploadAndSendFile()" class="success" id="btnUploadAndSend" style="display: none;">📎 上传并发送</button>
+        </div>
+        <pre id="sendMsgResult"></pre>
+
+        <h3>查看消息</h3>
+        <div class="form-row">
+          <label>好友ID</label>
+          <input id="chat_friend_id" type="text" placeholder="与谁的对话" />
+          <button onclick="loadMessages()">加载</button>
+        </div>
+        <div class="message-list" id="messagesList">
+          <div class="empty-state">
+            <div class="icon">💭</div>
+            <p>输入好友ID查看消息</p>
+          </div>
+        </div>
+
+        <h3>消息操作</h3>
+        <div class="form-row">
+          <label>消息UUID</label>
+          <input id="op_message_uuid" type="text" placeholder="消息UUID" />
+        </div>
+        <div class="btn-group">
+          <button onclick="deleteMessage()" class="danger">删除</button>
+          <button onclick="recallMessage()" class="warning">撤回</button>
+        </div>
+        <pre id="msgOpResult"></pre>
+      </div>
+
+      <!-- 个人资料模块 -->
+      <div class="card">
+        <h2><span class="icon">👤</span> 个人资料</h2>
+        
+        <button onclick="loadProfile()">获取个人信息</button>
+        <pre id="profileResult"></pre>
+
+        <h3>更新资料</h3>
+        <div class="form-row">
+          <label>邮箱</label>
+          <input id="profile_email" type="email" placeholder="新邮箱" />
+        </div>
+        <div class="form-row">
+          <label>签名</label>
+          <input id="profile_signature" type="text" placeholder="个性签名" />
+        </div>
+        <button onclick="updateProfile()">保存</button>
+
+        <h3>修改密码</h3>
+        <div class="form-row">
+          <label>旧密码</label>
+          <input id="old_password" type="password" placeholder="当前密码" />
+        </div>
+        <div class="form-row">
+          <label>新密码</label>
+          <input id="new_password" type="password" placeholder="新密码" />
+        </div>
+        <button onclick="changePassword()" class="warning">修改密码</button>
+
+        <h3>上传头像</h3>
+        <div class="form-row">
+          <input id="avatar_file" type="file" accept="image/*" />
+          <button onclick="uploadAvatar()">上传</button>
+        </div>
+        <pre id="avatarResult"></pre>
+      </div>
+
+      <!-- 文件存储模块 -->
+      <div class="card" style="grid-column: span 2;">
+        <h2><span class="icon">📁</span> 文件存储</h2>
+        
+        <div class="tabs">
+          <button class="tab active" onclick="switchTab('upload')">上传文件</button>
+          <button class="tab" onclick="switchTab('myfiles')">我的文件</button>
+          <button class="tab" onclick="switchTab('friendfile')">好友文件</button>
+        </div>
+
+        <div class="tab-content active" id="tab-upload">
+          <h3>上传新文件</h3>
+          <div class="form-row">
+            <label>选择文件</label>
+            <input id="upload_file" type="file" />
+          </div>
+          <div class="form-row">
+            <label>文件类型</label>
+            <select id="upload_file_type">
+              <option value="user_image">用户图片</option>
+              <option value="user_video">用户视频</option>
+              <option value="user_document">用户文档</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>存储位置</label>
+            <select id="upload_storage_location">
+              <option value="user_files">个人文件</option>
+              <option value="friend_messages">好友消息</option>
+            </select>
+          </div>
+          <div class="form-row" id="related_id_row" style="display: none;">
+            <label>好友ID</label>
+            <input id="upload_related_id" type="text" placeholder="选择好友消息时必填" />
+          </div>
+          <div class="checkbox-row">
+            <input type="checkbox" id="force_upload" />
+            <label for="force_upload">强制上传（跳过秒传）</label>
+          </div>
+          <button onclick="uploadFile()" class="success" style="margin-top: 12px;">开始上传</button>
+          
+          <div class="progress-bar" id="uploadProgress" style="display: none;">
+            <div class="fill" id="uploadProgressFill" style="width: 0%;"></div>
+          </div>
+          <p id="uploadProgressText" style="font-size: 0.8rem; color: var(--text-secondary);"></p>
+          <pre id="uploadResult"></pre>
+        </div>
+
+        <div class="tab-content" id="tab-myfiles">
+          <h3>我的文件</h3>
+          <button onclick="listMyFiles()">刷新文件列表</button>
+          <div class="file-grid" id="myFilesList" style="margin-top: 12px;"></div>
+          <pre id="myFilesResult"></pre>
+        </div>
+
+        <div class="tab-content" id="tab-friendfile">
+          <h3>好友文件预签名URL</h3>
+          <div class="form-row">
+            <label>文件UUID</label>
+            <input id="friend_file_uuid" type="text" placeholder="好友文件UUID" />
+          </div>
+          <div class="form-row">
+            <label>有效期</label>
+            <select id="friend_file_expires">
+              <option value="normal">普通（3小时）</option>
+              <option value="extended">扩展（自定义）</option>
+            </select>
+          </div>
+          <div class="form-row" id="extended_hours_row" style="display: none;">
+            <label>小时数</label>
+            <input id="extended_hours" type="number" value="24" min="3" max="168" />
+          </div>
+          <button onclick="getFriendFileUrl()">获取预签名URL</button>
+          <pre id="friendFileResult"></pre>
+          
+          <h3>文件预览</h3>
+          <div id="filePreview" style="margin-top: 12px; padding: 20px; background: var(--bg-primary); border-radius: 8px; text-align: center;">
+            <div class="empty-state">
+              <div class="icon">🖼️</div>
+              <p>获取预签名URL后可预览文件</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <script type="module" src="app-modular.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>

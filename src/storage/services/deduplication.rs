@@ -83,9 +83,17 @@ impl DeduplicationService {
 
     /// 从file_key提取bucket名称
     fn extract_bucket_from_key(file_key: &str) -> &str {
-        if file_key.contains('/') {
+        if file_key.starts_with("conv-") {
+            // 好友文件路径格式: conv-{user1}-{user2}/...
+            "friends-file"
+        } else if file_key.starts_with("group-") {
+            // 群文件路径格式: group-{group_id}/...
+            "group-file"
+        } else if file_key.contains('/') {
+            // 用户个人文件路径格式: {user_id}/...
             "user-file"
         } else {
+            // 头像文件格式: {user_id}.{ext}
             "avatars"
         }
     }

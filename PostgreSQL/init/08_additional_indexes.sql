@@ -80,9 +80,9 @@ WHERE "revoked-at" IS NULL;
 -- ========================================
 
 -- 用户+过期时间复合索引（批量拉黑时使用）
+-- 注意：部分索引不能使用 NOW() 等 VOLATILE 函数
 CREATE INDEX IF NOT EXISTS "idx-access-cache-user-exp"
-ON "user-access-cache"("user-id", "exp")
-WHERE "exp" > NOW();
+ON "user-access-cache"("user-id", "exp");
 
 -- ========================================
 -- friendships 表补充索引

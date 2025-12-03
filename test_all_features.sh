@@ -1,9 +1,12 @@
 #!/bin/bash
 
 # HuanVae Chat 完整功能测试脚本
-# 测试：用户注册、好友系统、个人资料、设备管理
+# 测试：用户注册、好友系统、个人资料、设备管理、文件存储、好友文件
 
 set -e  # 遇到错误立即退出
+
+# 获取脚本所在目录（解决相对路径问题）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 BASE_URL="http://localhost:8080"
 TIMESTAMP=$(date +%s)
@@ -412,7 +415,7 @@ sleep 1
 log_step "第 14 步：用户1 上传头像"
 
 # 使用真实图片文件作为头像
-AVATAR_FILE="./testfile/0BD129B455796E21375D51F2AED2CB3F.jpg"
+AVATAR_FILE="${SCRIPT_DIR}/testfile/0BD129B455796E21375D51F2AED2CB3F.jpg"
 if [ -f "$AVATAR_FILE" ]; then
     log_info "使用真实图片文件作为头像（6.1MB）"
     UPLOAD_AVATAR=$(curl -s -X POST "${BASE_URL}/api/profile/avatar" \
@@ -915,7 +918,7 @@ fi
 
 if [ -n "$HASH_CMD" ]; then
     # 使用真实图片文件进行测试
-    TEST_FILE="./testfile/0BD129B455796E21375D51F2AED2CB3F.jpg"
+    TEST_FILE="${SCRIPT_DIR}/testfile/0BD129B455796E21375D51F2AED2CB3F.jpg"
     if [ -f "$TEST_FILE" ]; then
         log_info "使用真实图片文件进行storage测试（6.1MB）"
         TEST_FILE_HASH=$($HASH_CMD "$TEST_FILE" | awk '{print $1}')
@@ -1285,7 +1288,7 @@ sleep 1
 
 log_step "第 44 步：测试真实大文件上传（71MB TIF）"
 
-LARGE_IMAGE="./testfile/landmask_SG_052020_COG512.tif"
+LARGE_IMAGE="${SCRIPT_DIR}/testfile/landmask_SG_052020_COG512.tif"
 if [ -f "$LARGE_IMAGE" ]; then
     log_info "计算71MB大图片文件哈希..."
     LARGE_IMG_HASH=$($HASH_CMD "$LARGE_IMAGE" | awk '{print $1}')
@@ -1460,43 +1463,426 @@ fi
 sleep 1
 
 # ==============================================
+# 第九部分：好友文件功能测试
+# ==============================================
+
+log_step "第 50 步：好友文件上传请求（验证好友关系）"
+
+if [ -n "$HASH_CMD" ]; then
+    log_info "用户1上传文件到好友聊天（friend_messages 存储位置）..."
+    FRIEND_FILE_REQ=$(api_call POST /api/storage/upload/request "$USER1_TOKEN_NEW" "{
+        \"file_type\": \"user_image\",
+        \"storage_location\": \"friend_messages\",
+        \"related_id\": \"$USER2_ID\",
+        \"filename\": \"friend_chat_image.jpg\",
+        \"file_size\": $TEST_FILE_SIZE,
+        \"content_type\": \"image/jpeg\",
+        \"file_hash\": \"$TEST_FILE_HASH\",
+        \"force_upload\": true
+    }")
+    echo "$FRIEND_FILE_REQ" | jq '.' 2>/dev/null || echo "$FRIEND_FILE_REQ"
+    
+    FRIEND_FILE_MODE=$(echo "$FRIEND_FILE_REQ" | jq -r '.mode' 2>/dev/null)
+    FRIEND_FILE_URL=$(echo "$FRIEND_FILE_REQ" | jq -r '.upload_url' 2>/dev/null)
+    FRIEND_FILE_KEY=$(echo "$FRIEND_FILE_REQ" | jq -r '.file_key' 2>/dev/null)
+    
+    if [ "$FRIEND_FILE_MODE" = "one_time_token" ] && [ -n "$FRIEND_FILE_URL" ] && [ "$FRIEND_FILE_URL" != "null" ]; then
+        log_success "✓ 好友文件上传请求成功（已验证好友关系）"
+        log_info "文件key: $FRIEND_FILE_KEY"
+        
+        # 验证file_key格式是否为 conv-{user1}-{user2}/images/...
+        if echo "$FRIEND_FILE_KEY" | grep -q "^conv-"; then
+            log_success "✓ 文件路径格式正确（conv-{user1}-{user2}/...）"
+        else
+            log_error "✗ 文件路径格式错误"
+        fi
+    else
+        log_error "✗ 好友文件上传请求失败"
+        echo "$FRIEND_FILE_REQ"
+    fi
+else
+    log_info "跳过好友文件测试（无哈希命令）"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 51 步：上传好友文件到MinIO（验证自动消息功能）"
+
+if [ -n "$FRIEND_FILE_URL" ] && [ "$FRIEND_FILE_URL" != "null" ]; then
+    log_info "上传好友文件（应自动发送消息）..."
+    FRIEND_FILE_UPLOAD=$(curl -s -X POST "$FRIEND_FILE_URL" \
+        -F "file=@$TEST_FILE")
+    echo "$FRIEND_FILE_UPLOAD" | jq '.' 2>/dev/null || echo "$FRIEND_FILE_UPLOAD"
+    
+    if echo "$FRIEND_FILE_UPLOAD" | jq -e '.file_url' > /dev/null 2>&1; then
+        FRIEND_FILE_UUID_URL=$(echo "$FRIEND_FILE_UPLOAD" | jq -r '.file_url')
+        FRIEND_FILE_UUID=$(echo "$FRIEND_FILE_UUID_URL" | grep -oP '(?<=/file/)[^/]+$')
+        AUTO_MSG_UUID=$(echo "$FRIEND_FILE_UPLOAD" | jq -r '.message_uuid' 2>/dev/null)
+        AUTO_MSG_TIME=$(echo "$FRIEND_FILE_UPLOAD" | jq -r '.message_send_time' 2>/dev/null)
+        
+        log_success "✓ 好友文件上传成功"
+        log_info "UUID访问URL: $FRIEND_FILE_UUID_URL"
+        log_info "文件UUID: $FRIEND_FILE_UUID"
+        
+        # 验证自动消息功能
+        if [ "$AUTO_MSG_UUID" != "null" ] && [ -n "$AUTO_MSG_UUID" ]; then
+            log_success "✓ 自动消息发送成功（新功能验证）"
+            log_info "消息UUID: $AUTO_MSG_UUID"
+            log_info "发送时间: $AUTO_MSG_TIME"
+            FILE_MSG_UUID="$AUTO_MSG_UUID"
+        else
+            log_error "✗ 自动消息功能未生效"
+        fi
+    else
+        log_error "✗ 好友文件上传失败"
+    fi
+else
+    log_info "跳过好友文件上传（无上传URL）"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 52 步：验证自动发送的消息（不再需要手动发送）"
+
+if [ -n "$FILE_MSG_UUID" ] && [ "$FILE_MSG_UUID" != "null" ]; then
+    log_info "用户2获取与用户1的消息（验证自动消息）..."
+    USER2_MESSAGES=$(api_call GET "/api/messages?friend_id=$USER1_ID&limit=5" "$USER2_TOKEN")
+    echo "$USER2_MESSAGES" | jq '.' 2>/dev/null || echo "$USER2_MESSAGES"
+    
+    # 检查消息中是否包含 file_uuid
+    RECEIVED_FILE_UUID=$(echo "$USER2_MESSAGES" | jq -r '.messages[0].file_uuid' 2>/dev/null)
+    RECEIVED_MSG_CONTENT=$(echo "$USER2_MESSAGES" | jq -r '.messages[0].message_content' 2>/dev/null)
+    RECEIVED_MSG_TYPE=$(echo "$USER2_MESSAGES" | jq -r '.messages[0].message_type' 2>/dev/null)
+    
+    if [ "$RECEIVED_FILE_UUID" = "$FRIEND_FILE_UUID" ]; then
+        log_success "✓ 自动消息包含正确的file_uuid"
+        log_info "file_uuid: $RECEIVED_FILE_UUID"
+        log_info "消息内容: $RECEIVED_MSG_CONTENT"
+        log_info "消息类型: $RECEIVED_MSG_TYPE"
+    else
+        log_error "✗ 消息中file_uuid不正确或缺失"
+        log_info "期望: $FRIEND_FILE_UUID"
+        log_info "实际: $RECEIVED_FILE_UUID"
+    fi
+else
+    log_info "跳过消息file_uuid验证（自动消息未生成）"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 53 步：用户1查看自己发送的自动消息"
+
+if [ -n "$FILE_MSG_UUID" ] && [ "$FILE_MSG_UUID" != "null" ]; then
+    log_info "用户1查看与用户2的消息..."
+    USER1_MESSAGES=$(api_call GET "/api/messages?friend_id=$USER2_ID&limit=5" "$USER1_TOKEN_NEW")
+    echo "$USER1_MESSAGES" | jq '.' 2>/dev/null || echo "$USER1_MESSAGES"
+    
+    # 验证双方都能看到自动消息
+    SENDER_FILE_UUID=$(echo "$USER1_MESSAGES" | jq -r '.messages[0].file_uuid' 2>/dev/null)
+    if [ "$SENDER_FILE_UUID" = "$FRIEND_FILE_UUID" ]; then
+        log_success "✓ 发送者也能看到自动消息"
+    else
+        log_error "✗ 发送者看不到自动消息"
+    fi
+else
+    log_info "跳过发送者消息验证"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 54 步：用户1获取好友文件预签名URL"
+
+if [ -n "$FRIEND_FILE_UUID" ]; then
+    log_info "用户1请求好友文件预签名URL..."
+    USER1_FRIEND_PRESIGN=$(api_call POST "/api/storage/friends-file/$FRIEND_FILE_UUID/presigned-url" "$USER1_TOKEN_NEW" "{
+        \"operation\": \"download\"
+    }")
+    echo "$USER1_FRIEND_PRESIGN" | jq '.' 2>/dev/null || echo "$USER1_FRIEND_PRESIGN"
+    
+    USER1_PRESIGN_URL=$(echo "$USER1_FRIEND_PRESIGN" | jq -r '.presigned_url' 2>/dev/null)
+    if [ -n "$USER1_PRESIGN_URL" ] && [ "$USER1_PRESIGN_URL" != "null" ]; then
+        log_success "✓ 用户1获取好友文件预签名URL成功"
+        log_info "URL: ${USER1_PRESIGN_URL:0:80}..."
+    else
+        log_error "✗ 用户1获取预签名URL失败"
+    fi
+else
+    log_info "跳过预签名URL测试"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 55 步：用户2获取好友文件预签名URL（另一方）"
+
+if [ -n "$FRIEND_FILE_UUID" ]; then
+    log_info "用户2请求好友文件预签名URL..."
+    USER2_FRIEND_PRESIGN=$(api_call POST "/api/storage/friends-file/$FRIEND_FILE_UUID/presigned-url" "$USER2_TOKEN" "{
+        \"operation\": \"download\"
+    }")
+    echo "$USER2_FRIEND_PRESIGN" | jq '.' 2>/dev/null || echo "$USER2_FRIEND_PRESIGN"
+    
+    USER2_PRESIGN_URL=$(echo "$USER2_FRIEND_PRESIGN" | jq -r '.presigned_url' 2>/dev/null)
+    if [ -n "$USER2_PRESIGN_URL" ] && [ "$USER2_PRESIGN_URL" != "null" ]; then
+        log_success "✓ 用户2获取好友文件预签名URL成功（双方都可访问）"
+        log_info "URL: ${USER2_PRESIGN_URL:0:80}..."
+    else
+        log_error "✗ 用户2获取预签名URL失败"
+    fi
+else
+    log_info "跳过用户2预签名URL测试"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 56 步：非会话参与者访问好友文件（应被拒绝）"
+
+# 创建第三个用户
+USER3_ID="testuser_${TIMESTAMP}_3"
+log_info "创建第三个用户用于测试..."
+
+REGISTER3=$(api_call POST /api/auth/register "" "{
+    \"user_id\": \"$USER3_ID\",
+    \"nickname\": \"测试用户3\",
+    \"email\": \"${USER3_ID}@example.com\",
+    \"password\": \"$PASSWORD\"
+}")
+
+LOGIN3=$(api_call POST /api/auth/login "" "{
+    \"user_id\": \"$USER3_ID\",
+    \"password\": \"$PASSWORD\",
+    \"device_info\": \"$DEVICE_INFO\",
+    \"mac_address\": \"00:11:22:33:44:77\"
+}")
+
+USER3_TOKEN=$(echo "$LOGIN3" | jq -r '.access_token')
+
+if [ -n "$USER3_TOKEN" ] && [ "$USER3_TOKEN" != "null" ] && [ -n "$FRIEND_FILE_UUID" ]; then
+    log_info "用户3（非会话参与者）尝试访问好友文件..."
+    USER3_ACCESS=$(api_call POST "/api/storage/friends-file/$FRIEND_FILE_UUID/presigned-url" "$USER3_TOKEN" "{
+        \"operation\": \"download\"
+    }")
+    echo "$USER3_ACCESS" | jq '.' 2>/dev/null || echo "$USER3_ACCESS"
+    
+    if echo "$USER3_ACCESS" | grep -qi "无权访问\|forbidden\|error"; then
+        log_success "✓ 非会话参与者访问被正确拒绝"
+    else
+        log_error "✗ 非会话参与者不应该能访问好友文件（安全问题）"
+    fi
+else
+    log_info "跳过非会话参与者测试"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 57 步：删除好友后访问文件（应被拒绝）"
+
+if [ -n "$FRIEND_FILE_UUID" ]; then
+    # 用户1删除用户2好友
+    log_info "用户1删除用户2好友..."
+    REMOVE_FRIEND2=$(api_call POST /api/friends/remove "$USER1_TOKEN_NEW" "{
+        \"user_id\": \"$USER1_ID\",
+        \"friend_user_id\": \"$USER2_ID\",
+        \"remove_time\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",
+        \"remove_reason\": \"测试好友删除后文件访问\"
+    }")
+    
+    sleep 1
+    
+    # 用户2尝试访问文件
+    log_info "用户2（已被删除好友）尝试访问好友文件..."
+    DELETED_FRIEND_ACCESS=$(api_call POST "/api/storage/friends-file/$FRIEND_FILE_UUID/presigned-url" "$USER2_TOKEN" "{
+        \"operation\": \"download\"
+    }")
+    echo "$DELETED_FRIEND_ACCESS" | jq '.' 2>/dev/null || echo "$DELETED_FRIEND_ACCESS"
+    
+    if echo "$DELETED_FRIEND_ACCESS" | grep -qi "好友关系已解除\|无法访问\|forbidden\|error"; then
+        log_success "✓ 删除好友后访问被正确拒绝"
+    else
+        log_error "✗ 删除好友后不应该能访问文件（安全问题）"
+    fi
+else
+    log_info "跳过好友删除后访问测试"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 58 步：重新添加好友后恢复访问"
+
+if [ -n "$FRIEND_FILE_UUID" ]; then
+    # 用户1重新添加用户2为好友
+    log_info "用户1重新向用户2发送好友请求..."
+    FRIEND_REQ_AGAIN=$(api_call POST /api/friends/requests "$USER1_TOKEN_NEW" "{
+        \"user_id\": \"$USER1_ID\",
+        \"target_user_id\": \"$USER2_ID\",
+        \"reason\": \"重新添加好友测试文件访问\",
+        \"request_time\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+    }")
+    
+    sleep 1
+    
+    # 用户2同意好友请求
+    log_info "用户2同意好友请求..."
+    APPROVE_AGAIN=$(api_call POST /api/friends/requests/approve "$USER2_TOKEN" "{
+        \"user_id\": \"$USER2_ID\",
+        \"applicant_user_id\": \"$USER1_ID\",
+        \"approved_time\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+    }")
+    
+    sleep 1
+    
+    # 用户2再次尝试访问文件
+    log_info "用户2（恢复好友关系后）再次尝试访问好友文件..."
+    RESTORED_ACCESS=$(api_call POST "/api/storage/friends-file/$FRIEND_FILE_UUID/presigned-url" "$USER2_TOKEN" "{
+        \"operation\": \"download\"
+    }")
+    echo "$RESTORED_ACCESS" | jq '.' 2>/dev/null || echo "$RESTORED_ACCESS"
+    
+    RESTORED_URL=$(echo "$RESTORED_ACCESS" | jq -r '.presigned_url' 2>/dev/null)
+    if [ -n "$RESTORED_URL" ] && [ "$RESTORED_URL" != "null" ]; then
+        log_success "✓ 重新成为好友后访问恢复"
+    else
+        log_error "✗ 重新成为好友后仍无法访问"
+    fi
+else
+    log_info "跳过好友恢复后访问测试"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 59 步：好友文件预签名URL下载验证"
+
+if [ -n "$USER2_PRESIGN_URL" ] && [ "$USER2_PRESIGN_URL" != "null" ]; then
+    log_info "使用预签名URL下载好友文件..."
+    FRIEND_DOWNLOAD_FILE="/tmp/friend_downloaded_${TIMESTAMP}.jpg"
+    
+    HTTP_CODE=$(curl -s -w "%{http_code}" -o "$FRIEND_DOWNLOAD_FILE" "$USER2_PRESIGN_URL" 2>/dev/null || echo "000")
+    
+    if [ "$HTTP_CODE" = "200" ] && [ -f "$FRIEND_DOWNLOAD_FILE" ]; then
+        FRIEND_DOWNLOAD_HASH=$($HASH_CMD "$FRIEND_DOWNLOAD_FILE" | awk '{print $1}')
+        FRIEND_DOWNLOAD_SIZE=$(stat -f%z "$FRIEND_DOWNLOAD_FILE" 2>/dev/null || stat -c%s "$FRIEND_DOWNLOAD_FILE" 2>/dev/null)
+        
+        log_success "✓ 好友文件下载成功 (HTTP $HTTP_CODE)"
+        log_info "下载文件大小: $(($FRIEND_DOWNLOAD_SIZE / 1024)) KB"
+        
+        # 验证文件完整性
+        if [ "$FRIEND_DOWNLOAD_HASH" = "$TEST_FILE_HASH" ]; then
+            log_success "✓ 好友文件完整性验证通过（哈希一致）"
+        else
+            log_error "✗ 好友文件完整性验证失败"
+            log_info "原始哈希: $TEST_FILE_HASH"
+            log_info "下载哈希: $FRIEND_DOWNLOAD_HASH"
+        fi
+        
+        rm -f "$FRIEND_DOWNLOAD_FILE"
+    else
+        log_error "✗ 好友文件下载失败 (HTTP $HTTP_CODE)"
+    fi
+else
+    log_info "跳过好友文件下载验证"
+fi
+
+sleep 1
+
+# ==============================================
+
+log_step "第 60 步：好友文件扩展预签名URL测试（超大文件）"
+
+if [ -n "$FRIEND_FILE_UUID" ]; then
+    log_info "用户1请求7天有效期的好友文件扩展预签名URL..."
+    FRIEND_EXT_PRESIGN=$(api_call POST "/api/storage/friends-file/$FRIEND_FILE_UUID/presigned-url/extended" "$USER1_TOKEN_NEW" "{
+        \"estimated_download_time\": 604800
+    }")
+    echo "$FRIEND_EXT_PRESIGN" | jq '.' 2>/dev/null || echo "$FRIEND_EXT_PRESIGN"
+    
+    FRIEND_EXT_URL=$(echo "$FRIEND_EXT_PRESIGN" | jq -r '.presigned_url' 2>/dev/null)
+    FRIEND_EXT_EXPIRES=$(echo "$FRIEND_EXT_PRESIGN" | jq -r '.expires_at' 2>/dev/null)
+    FRIEND_EXT_WARNING=$(echo "$FRIEND_EXT_PRESIGN" | jq -r '.warning' 2>/dev/null)
+    
+    if [ -n "$FRIEND_EXT_URL" ] && [ "$FRIEND_EXT_URL" != "null" ]; then
+        log_success "✓ 好友文件扩展预签名URL生成成功（7天有效期）"
+        log_info "过期时间: $FRIEND_EXT_EXPIRES"
+        if [ -n "$FRIEND_EXT_WARNING" ] && [ "$FRIEND_EXT_WARNING" != "null" ]; then
+            log_info "警告: $FRIEND_EXT_WARNING"
+        fi
+    else
+        log_error "✗ 好友文件扩展预签名URL生成失败"
+    fi
+else
+    log_info "跳过好友文件扩展URL测试"
+fi
+
+sleep 1
+
+# ==============================================
 # 测试总结
 # ==============================================
 
 log_step "测试完成 - 总结报告"
 
 echo ""
-echo -e "${GREEN}╔════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║              测试执行总结                              ║${NC}"
-echo -e "${GREEN}╠════════════════════════════════════════════════════════╣${NC}"
-echo -e "${GREEN}║  ✓ 用户注册         2 个用户                          ║${NC}"
-echo -e "${GREEN}║  ✓ 用户登录         验证通过                          ║${NC}"
-echo -e "${GREEN}║  ✓ 好友请求         发送/接收                          ║${NC}"
-echo -e "${GREEN}║  ✓ 好友管理         同意/删除                          ║${NC}"
-echo -e "${GREEN}║  ✓ 个人资料         查询/更新                          ║${NC}"
-echo -e "${GREEN}║  ✓ 密码修改         验证通过                          ║${NC}"
-echo -e "${GREEN}║  ✓ 头像上传         上传成功                          ║${NC}"
-echo -e "${GREEN}║  ✓ 设备管理         删除设备                          ║${NC}"
-echo -e "${GREEN}║  ✓ Token 失效       验证正确                          ║${NC}"
-echo -e "${GREEN}║  ✓ 重新登录         流程验证                          ║${NC}"
-echo -e "${GREEN}║  ✓ 消息发送         文本消息                          ║${NC}"
-echo -e "${GREEN}║  ✓ 消息查询         分页查询                          ║${NC}"
-echo -e "${GREEN}║  ✓ 消息删除         软删除                            ║${NC}"
-echo -e "${GREEN}║  ✓ 消息撤回         2分钟内                           ║${NC}"
-echo -e "${GREEN}║  ✓ 权限验证         非好友拒绝                        ║${NC}"
-echo -e "${GREEN}║  ✓ 文件上传         SHA-256哈希验证                    ║${NC}"
-echo -e "${GREEN}║  ✓ UUID映射         秒传机制（跨用户生效）            ║${NC}"
-echo -e "${GREEN}║  ✓ 强制上传         跳过秒传（force_upload=true）     ║${NC}"
-echo -e "${GREEN}║  ✓ UUID访问         /api/storage/file/{uuid}          ║${NC}"
-echo -e "${GREEN}║  ✓ 预签名URL        3小时有效期（MinIO直连）          ║${NC}"
-echo -e "${GREEN}║  ✓ 扩展URL          7天有效期（超大文件）             ║${NC}"
-echo -e "${GREEN}║  ✓ Range请求        视频流式播放支持                  ║${NC}"
-echo -e "${GREEN}║  ✓ 跨用户秒传       UUID映射机制验证                  ║${NC}"
-echo -e "${GREEN}║  ✓ 权限控制         基于权限表的访问验证              ║${NC}"
-echo -e "${GREEN}║  ✓ 文件完整性       哈希值验证通过                    ║${NC}"
-echo -e "${GREEN}║  ✓ 71MB大文件       TIF格式上传测试                   ║${NC}"
-echo -e "${GREEN}║  ✓ 文件列表查询     分页排序功能验证                  ║${NC}"
-echo -e "${GREEN}╚════════════════════════════════════════════════════════╝${NC}"
+echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║                   测试执行总结                                ║${NC}"
+echo -e "${GREEN}╠══════════════════════════════════════════════════════════════╣${NC}"
+echo -e "${GREEN}║  ✓ 用户注册         2 个用户                                 ║${NC}"
+echo -e "${GREEN}║  ✓ 用户登录         验证通过                                 ║${NC}"
+echo -e "${GREEN}║  ✓ 好友请求         发送/接收                                ║${NC}"
+echo -e "${GREEN}║  ✓ 好友管理         同意/删除                                ║${NC}"
+echo -e "${GREEN}║  ✓ 个人资料         查询/更新                                ║${NC}"
+echo -e "${GREEN}║  ✓ 密码修改         验证通过                                 ║${NC}"
+echo -e "${GREEN}║  ✓ 头像上传         上传成功                                 ║${NC}"
+echo -e "${GREEN}║  ✓ 设备管理         删除设备                                 ║${NC}"
+echo -e "${GREEN}║  ✓ Token 失效       验证正确                                 ║${NC}"
+echo -e "${GREEN}║  ✓ 重新登录         流程验证                                 ║${NC}"
+echo -e "${GREEN}║  ✓ 消息发送         文本消息                                 ║${NC}"
+echo -e "${GREEN}║  ✓ 消息查询         分页查询                                 ║${NC}"
+echo -e "${GREEN}║  ✓ 消息删除         软删除                                   ║${NC}"
+echo -e "${GREEN}║  ✓ 消息撤回         2分钟内                                  ║${NC}"
+echo -e "${GREEN}║  ✓ 权限验证         非好友拒绝                               ║${NC}"
+echo -e "${GREEN}║  ✓ 文件上传         SHA-256哈希验证                          ║${NC}"
+echo -e "${GREEN}║  ✓ UUID映射         秒传机制（跨用户生效）                   ║${NC}"
+echo -e "${GREEN}║  ✓ 强制上传         跳过秒传（force_upload=true）            ║${NC}"
+echo -e "${GREEN}║  ✓ UUID访问         /api/storage/file/{uuid}                 ║${NC}"
+echo -e "${GREEN}║  ✓ 预签名URL        3小时有效期（MinIO直连）                 ║${NC}"
+echo -e "${GREEN}║  ✓ 扩展URL          7天有效期（超大文件）                    ║${NC}"
+echo -e "${GREEN}║  ✓ Range请求        视频流式播放支持                         ║${NC}"
+echo -e "${GREEN}║  ✓ 跨用户秒传       UUID映射机制验证                         ║${NC}"
+echo -e "${GREEN}║  ✓ 权限控制         基于权限表的访问验证                     ║${NC}"
+echo -e "${GREEN}║  ✓ 文件完整性       哈希值验证通过                           ║${NC}"
+echo -e "${GREEN}║  ✓ 71MB大文件       TIF格式上传测试                          ║${NC}"
+echo -e "${GREEN}║  ✓ 文件列表查询     分页排序功能验证                         ║${NC}"
+echo -e "${GREEN}╠══════════════════════════════════════════════════════════════╣${NC}"
+echo -e "${GREEN}║                   好友文件功能测试                            ║${NC}"
+echo -e "${GREEN}╠══════════════════════════════════════════════════════════════╣${NC}"
+echo -e "${GREEN}║  ✓ 好友文件上传     验证好友关系后上传                       ║${NC}"
+echo -e "${GREEN}║  ✓ 文件路径格式     conv-{user1}-{user2}/images/...          ║${NC}"
+echo -e "${GREEN}║  ✓ 自动消息发送     上传完成后自动插入文件消息到聊天         ║${NC}"
+echo -e "${GREEN}║  ✓ 消息内容格式     [图片]/[视频]/[文件] + 文件名            ║${NC}"
+echo -e "${GREEN}║  ✓ 双方预签名URL    会话双方都可获取访问链接                 ║${NC}"
+echo -e "${GREEN}║  ✓ 非参与者拒绝     第三方用户无法访问                       ║${NC}"
+echo -e "${GREEN}║  ✓ 好友删除拒绝     解除好友关系后无法访问                   ║${NC}"
+echo -e "${GREEN}║  ✓ 好友恢复访问     重新成为好友后恢复访问权限               ║${NC}"
+echo -e "${GREEN}║  ✓ 文件下载验证     预签名URL实际下载成功                    ║${NC}"
+echo -e "${GREEN}║  ✓ 文件完整性       哈希值验证通过                           ║${NC}"
+echo -e "${GREEN}║  ✓ 扩展URL          好友文件7天有效期                        ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
 echo -e "${BLUE}测试数据：${NC}"

@@ -99,6 +99,8 @@ impl FileService {
                     max_file_size: 0,
                     instant_upload: true,
                     existing_file_url: Some(existing.file_url),
+                    message_uuid: None,
+                    message_send_time: None,
                 });
             }
         }
@@ -179,6 +181,8 @@ impl FileService {
             max_file_size: FileValidator::get_max_file_size(&request.file_type),
             instant_upload: false,
             existing_file_url: None,
+            message_uuid: None,
+            message_send_time: None,
         })
     }
 
@@ -238,6 +242,8 @@ impl FileService {
             max_file_size: FileValidator::get_max_file_size(&request.file_type),
             instant_upload: false,
             existing_file_url: None,
+            message_uuid: None,
+            message_send_time: None,
         })
     }
 

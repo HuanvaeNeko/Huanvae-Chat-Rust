@@ -23,6 +23,14 @@ pub struct FileUploadResponse {
     /// 秒传标识（文件已存在）
     pub instant_upload: bool,
     pub existing_file_url: Option<String>,
+    
+    /// 消息UUID（好友文件秒传时自动插入消息）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_uuid: Option<String>,
+    
+    /// 消息发送时间（好友文件秒传时自动插入消息）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_send_time: Option<String>,
 }
 
 /// 文件上传完成响应
@@ -33,6 +41,14 @@ pub struct FileCompleteResponse {
     pub file_size: u64,
     pub content_type: String,
     pub preview_support: PreviewSupport,
+    
+    /// 消息UUID（好友文件上传时自动插入消息）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_uuid: Option<String>,
+    
+    /// 消息发送时间（好友文件上传时自动插入消息）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_send_time: Option<String>,
 }
 
 /// 下载响应
