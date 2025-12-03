@@ -1,6 +1,7 @@
 -- ========================================
--- 补充复合索引（提升查询性能）
--- 创建时间: 2025-12-02
+-- HuanVae Chat 补充索引
+-- 创建时间: 2025-12-03
+-- 包含所有表的复合索引和部分索引，提升查询性能
 -- ========================================
 
 -- ========================================
@@ -26,10 +27,6 @@ ON "file-records"("owner-id", "storage-location", "status");
 -- ========================================
 -- friend-messages 表复合索引
 -- ========================================
-
--- 会话+时间复合索引（主查询：获取会话消息）
-CREATE INDEX IF NOT EXISTS "idx-messages-conversation-time" 
-ON "friend-messages"("conversation-uuid", "send-time" DESC);
 
 -- 发送者+删除状态（发送者视角查询，仅索引未删除消息）
 CREATE INDEX IF NOT EXISTS "idx-messages-sender-deleted" 
@@ -80,7 +77,6 @@ WHERE "revoked-at" IS NULL;
 -- ========================================
 
 -- 用户+过期时间复合索引（批量拉黑时使用）
--- 注意：部分索引不能使用 NOW() 等 VOLATILE 函数
 CREATE INDEX IF NOT EXISTS "idx-access-cache-user-exp"
 ON "user-access-cache"("user-id", "exp");
 
@@ -102,31 +98,17 @@ WHERE "status" = 'active';
 \echo '';
 \echo '新增索引:';
 \echo '';
-\echo '  file-records 表:';
-\echo '    - idx-file-records-owner-status';
-\echo '    - idx-file-records-location-status';
-\echo '    - idx-file-records-hash-status (部分索引)';
-\echo '    - idx-file-records-owner-location-status';
+\echo '  file-records 表:                 4个索引';
+\echo '  friend-messages 表:              4个索引';
+\echo '  token-blacklist 表:              2个索引';
+\echo '  file-access-permissions 表:      2个索引';
+\echo '  user-access-cache 表:            1个索引';
+\echo '  friendships 表:                  1个索引';
 \echo '';
-\echo '  friend-messages 表:';
-\echo '    - idx-messages-conversation-time';
-\echo '    - idx-messages-sender-deleted (部分索引)';
-\echo '    - idx-messages-receiver-deleted (部分索引)';
-\echo '    - idx-messages-conv-sender-deleted';
-\echo '    - idx-messages-conv-receiver-deleted';
+\echo '  总计: 14个复合/部分索引';
 \echo '';
-\echo '  token-blacklist 表:';
-\echo '    - idx-blacklist-user-type';
-\echo '    - idx-blacklist-user-expires';
-\echo '';
-\echo '  file-access-permissions 表:';
-\echo '    - idx-file-access-user-type (部分索引)';
-\echo '    - idx-file-access-uuid-user (部分索引)';
-\echo '';
-\echo '  user-access-cache 表:';
-\echo '    - idx-access-cache-user-exp (部分索引)';
-\echo '';
-\echo '  friendships 表:';
-\echo '    - idx-friendships-user-friend-status (部分索引)';
+\echo '说明: 部分索引仅索引满足特定条件的行，';
+\echo '      可以减少索引大小并提升查询性能';
 \echo '';
 \echo '========================================';
+

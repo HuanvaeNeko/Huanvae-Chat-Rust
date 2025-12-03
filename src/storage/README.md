@@ -482,10 +482,6 @@ UUID映射表，实现跨用户去重。
 | granted_at | TIMESTAMPTZ | 授权时间 |
 | revoked_at | TIMESTAMPTZ | 软删除时间 |
 
-### file_references 表
-
-文件引用表（已废弃，被UUID机制取代）。
-
 ### user_storage_quotas 表
 
 用户存储配额管理。

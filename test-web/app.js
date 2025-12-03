@@ -729,6 +729,9 @@ async function loadMessages() {
     if (result.messages && result.messages.length > 0) {
       container.innerHTML = result.messages.map(msg => {
         const isSent = msg.sender_id === myId;
+        const hasFile = msg.file_uuid && msg.file_uuid !== 'null';
+        const isMedia = hasFile && (msg.message_type === 'image' || msg.message_type === 'video');
+        
         return `
           <div class="message-item ${isSent ? 'sent' : 'received'}">
             <div class="message-header">
@@ -736,7 +739,14 @@ async function loadMessages() {
             </div>
             <div class="message-content">
               ${msg.message_type !== 'text' ? `[${msg.message_type}] ` : ''}${msg.message_content}
-              ${msg.file_uuid ? `<br><small>📎 ${msg.file_uuid}</small>` : ''}
+              ${hasFile ? `
+                <div id="preview-${msg.message_uuid}" style="margin-top: 8px;">
+                  <button onclick="previewMessageFile('${msg.file_uuid}', '${msg.message_type}', '${msg.message_uuid}')" 
+                    style="padding: 4px 10px; font-size: 0.75rem; background: var(--accent-blue); color: white; border: none; border-radius: 4px; cursor: pointer;">
+                    ${isMedia ? '👁️ 预览' : '📥 下载'}
+                  </button>
+                </div>
+              ` : ''}
             </div>
             <div style="margin-top: 6px; font-size: 0.7rem; opacity: 0.6;">
               ${msg.message_uuid.substring(0, 8)}...
@@ -750,6 +760,59 @@ async function loadMessages() {
     }
   } catch (err) {
     showToast(err.message, 'error');
+  }
+}
+
+// 预览消息中的文件
+async function previewMessageFile(fileUuid, messageType, messageUuid) {
+  if (!state.accessToken || !fileUuid) return;
+  
+  const previewContainer = document.getElementById(`preview-${messageUuid}`);
+  if (!previewContainer) return;
+  
+  // 显示加载状态
+  previewContainer.innerHTML = '<span style="color: var(--text-secondary);">加载中...</span>';
+  
+  try {
+    // 获取好友文件预签名URL
+    const result = await api(`/api/storage/friends-file/${fileUuid}/presigned-url`, {
+      method: 'POST',
+      token: state.accessToken,
+      body: { operation: 'download' }
+    });
+    
+    const url = result.presigned_url;
+    const contentType = result.content_type || '';
+    
+    // 根据类型显示预览
+    if (contentType.startsWith('image/')) {
+      previewContainer.innerHTML = `
+        <img src="${url}" alt="图片" style="max-width: 100%; max-height: 300px; border-radius: 8px; margin-top: 8px; cursor: pointer;" 
+          onclick="window.open('${url}', '_blank')" />
+        <div style="margin-top: 4px;">
+          <a href="${url}" download style="font-size: 0.75rem; color: var(--accent-blue);">下载原图</a>
+        </div>
+      `;
+    } else if (contentType.startsWith('video/')) {
+      previewContainer.innerHTML = `
+        <video controls style="max-width: 100%; max-height: 300px; border-radius: 8px; margin-top: 8px;">
+          <source src="${url}" type="${contentType}">
+          您的浏览器不支持视频播放
+        </video>
+        <div style="margin-top: 4px;">
+          <a href="${url}" download style="font-size: 0.75rem; color: var(--accent-blue);">下载视频</a>
+        </div>
+      `;
+    } else {
+      // 其他文件类型直接提供下载
+      previewContainer.innerHTML = `
+        <a href="${url}" download style="display: inline-block; padding: 6px 12px; background: var(--accent-green); color: white; border-radius: 4px; text-decoration: none; font-size: 0.75rem;">
+          📥 下载文件
+        </a>
+      `;
+    }
+  } catch (err) {
+    previewContainer.innerHTML = `<span style="color: var(--accent-red); font-size: 0.75rem;">预览失败: ${err.message}</span>`;
   }
 }
 
