@@ -30,10 +30,8 @@ impl GroupService {
         let now = Utc::now();
 
         // 开始事务
-        let mut tx = self.db.begin().await.map_err(|e| {
-            tracing::error!("开始事务失败: {}", e);
-            AppError::Internal
-        })?;
+        let mut tx = self.db.begin().await
+            .map_err(|e| AppError::Database(format!("开始事务失败: {}", e)))?;
 
         // 创建群聊
         sqlx::query(
@@ -49,10 +47,7 @@ impl GroupService {
         .bind(now)
         .execute(&mut *tx)
         .await
-        .map_err(|e| {
-            tracing::error!("创建群聊失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("创建群聊失败: {}", e)))?;
 
         // 添加创建者为群主
         sqlx::query(
@@ -65,16 +60,11 @@ impl GroupService {
         .bind(now)
         .execute(&mut *tx)
         .await
-        .map_err(|e| {
-            tracing::error!("添加群主失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("添加群主失败: {}", e)))?;
 
         // 提交事务
-        tx.commit().await.map_err(|e| {
-            tracing::error!("提交事务失败: {}", e);
-            AppError::Internal
-        })?;
+        tx.commit().await
+            .map_err(|e| AppError::Database(format!("提交事务失败: {}", e)))?;
 
         Ok(CreateGroupResponse {
             group_id: group_id.to_string(),
@@ -91,10 +81,7 @@ impl GroupService {
         .bind(group_id)
         .fetch_optional(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("查询群聊失败: {}", e);
-            AppError::Internal
-        })?
+        .map_err(|e| AppError::Database(format!("查询群聊失败: {}", e)))?
         .ok_or_else(|| AppError::NotFound("群聊不存在".to_string()))?;
 
         Ok(GroupInfo::from(group))
@@ -154,10 +141,7 @@ impl GroupService {
         } else {
             return Ok(());
         }
-        .map_err(|e| {
-            tracing::error!("更新群聊信息失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("更新群聊信息失败: {}", e)))?;
 
         Ok(())
     }
@@ -178,10 +162,7 @@ impl GroupService {
             .bind(group_id)
             .execute(&self.db)
             .await
-            .map_err(|e| {
-                tracing::error!("更新入群模式失败: {}", e);
-                AppError::Internal
-            })?;
+            .map_err(|e| AppError::Database(format!("更新入群模式失败: {}", e)))?;
 
         Ok(())
     }
@@ -195,10 +176,8 @@ impl GroupService {
         let now = Utc::now();
 
         // 开始事务
-        let mut tx = self.db.begin().await.map_err(|e| {
-            tracing::error!("开始事务失败: {}", e);
-            AppError::Internal
-        })?;
+        let mut tx = self.db.begin().await
+            .map_err(|e| AppError::Database(format!("开始事务失败: {}", e)))?;
 
         // 更新群状态
         sqlx::query(
@@ -213,10 +192,7 @@ impl GroupService {
         .bind(group_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| {
-            tracing::error!("更新群状态失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("更新群状态失败: {}", e)))?;
 
         // 更新所有成员状态
         sqlx::query(
@@ -230,10 +206,7 @@ impl GroupService {
         .bind(group_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| {
-            tracing::error!("更新成员状态失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("更新成员状态失败: {}", e)))?;
 
         // 撤销所有邀请码
         sqlx::query(
@@ -248,10 +221,7 @@ impl GroupService {
         .bind(group_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| {
-            tracing::error!("撤销邀请码失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("撤销邀请码失败: {}", e)))?;
 
         // 取消所有待处理的入群申请
         sqlx::query(
@@ -262,26 +232,18 @@ impl GroupService {
         .bind(group_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| {
-            tracing::error!("取消入群申请失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("取消入群申请失败: {}", e)))?;
 
         // 删除未读消息记录
         sqlx::query(r#"DELETE FROM "group-unread-messages" WHERE "group-id" = $1"#)
             .bind(group_id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| {
-                tracing::error!("删除未读消息记录失败: {}", e);
-                AppError::Internal
-            })?;
+            .map_err(|e| AppError::Database(format!("删除未读消息记录失败: {}", e)))?;
 
         // 提交事务
-        tx.commit().await.map_err(|e| {
-            tracing::error!("提交事务失败: {}", e);
-            AppError::Internal
-        })?;
+        tx.commit().await
+            .map_err(|e| AppError::Database(format!("提交事务失败: {}", e)))?;
 
         Ok(())
     }
@@ -302,10 +264,7 @@ impl GroupService {
         .bind(user_id)
         .fetch_all(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("查询用户群聊列表失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("查询用户群聊列表失败: {}", e)))?;
 
         let groups = rows
             .into_iter()
@@ -336,10 +295,7 @@ impl GroupService {
             .bind(group_id)
             .execute(&self.db)
             .await
-            .map_err(|e| {
-                tracing::error!("更新群头像失败: {}", e);
-                AppError::Internal
-            })?;
+            .map_err(|e| AppError::Database(format!("更新群头像失败: {}", e)))?;
 
         Ok(())
     }
@@ -352,10 +308,7 @@ impl GroupService {
         .bind(group_id)
         .fetch_optional(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("查询群状态失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("查询群状态失败: {}", e)))?;
 
         match result {
             Some((status,)) => Ok(status == "active"),
@@ -369,10 +322,7 @@ impl GroupService {
             .bind(group_id)
             .execute(&self.db)
             .await
-            .map_err(|e| {
-                tracing::error!("增加成员计数失败: {}", e);
-                AppError::Internal
-            })?;
+            .map_err(|e| AppError::Database(format!("增加成员计数失败: {}", e)))?;
         Ok(())
     }
 
@@ -382,10 +332,7 @@ impl GroupService {
             .bind(group_id)
             .execute(&self.db)
             .await
-            .map_err(|e| {
-                tracing::error!("减少成员计数失败: {}", e);
-                AppError::Internal
-            })?;
+            .map_err(|e| AppError::Database(format!("减少成员计数失败: {}", e)))?;
         Ok(())
     }
 }

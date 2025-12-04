@@ -67,10 +67,7 @@ impl InviteCodeService {
         .bind(now)
         .execute(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("创建邀请码失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("创建邀请码失败: {}", e)))?;
 
         Ok(CreateInviteCodeResponse {
             id: id.to_string(),
@@ -109,10 +106,7 @@ impl InviteCodeService {
             .fetch_all(&self.db)
             .await
         }
-        .map_err(|e| {
-            tracing::error!("查询邀请码列表失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("查询邀请码列表失败: {}", e)))?;
 
         Ok(codes.into_iter().map(InviteCodeInfo::from).collect())
     }
@@ -137,10 +131,7 @@ impl InviteCodeService {
         .bind(code_id)
         .execute(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("撤销邀请码失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("撤销邀请码失败: {}", e)))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::BadRequest("邀请码不存在或已失效".to_string()));
@@ -163,10 +154,7 @@ impl InviteCodeService {
         .bind(code)
         .fetch_optional(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("查询邀请码失败: {}", e);
-            AppError::Internal
-        })?
+        .map_err(|e| AppError::Database(format!("查询邀请码失败: {}", e)))?
         .ok_or_else(|| AppError::BadRequest("邀请码无效或已失效".to_string()))?;
 
         // 检查是否过期
@@ -202,10 +190,7 @@ impl InviteCodeService {
         .bind(invite_code.id)
         .execute(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("更新邀请码使用次数失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("更新邀请码使用次数失败: {}", e)))?;
 
         // 检查是否达到上限，如果是则更新状态
         if let Some(max_uses) = invite_code.max_uses {

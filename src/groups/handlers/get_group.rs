@@ -54,10 +54,7 @@ pub async fn search_groups(
     .bind(&params.keyword)
     .fetch_all(&state.db)
     .await
-    .map_err(|e| {
-        tracing::error!("搜索群聊失败: {}", e);
-        AppError::Internal
-    })?;
+    .map_err(|e| AppError::Database(format!("搜索群聊失败: {}", e)))?;
 
     let infos: Vec<GroupInfo> = groups.into_iter().map(GroupInfo::from).collect();
     Ok(Json(ApiResponse::success(infos)))

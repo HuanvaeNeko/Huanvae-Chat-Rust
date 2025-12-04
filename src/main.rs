@@ -7,6 +7,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 // 导入模块
 use huanvae_chat::app_state::AppState;
 use huanvae_chat::auth::{handlers::create_auth_routes, utils::KeyManager};
+use huanvae_chat::common;
 use huanvae_chat::config::get_config;
 use huanvae_chat::friends::handlers::create_friend_routes;
 use huanvae_chat::friends_messages::handlers::create_messages_routes;
@@ -14,6 +15,7 @@ use huanvae_chat::groups::create_group_routes;
 use huanvae_chat::group_messages::create_group_messages_routes;
 use huanvae_chat::profile::handlers::routes::profile_routes;
 use huanvae_chat::storage::{create_storage_routes, S3Client};
+use huanvae_chat::websocket::ws_routes;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -129,6 +131,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    // 8.1 启动消息归档定时任务
+    {
+        let archive_service = common::MessageArchiveService::new(db.clone());
+        let message_config = &config.message;
+        let archive_days = message_config.archive_days;
+        let archive_interval_secs = message_config.archive_interval_secs;
+        
+        tracing::info!("📦 消息归档任务已启动:");
+        tracing::info!("   - 归档 {} 天前的消息", archive_days);
+        tracing::info!("   - 检查间隔: {}秒", archive_interval_secs);
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(archive_interval_secs));
+            
+            loop {
+                interval.tick().await;
+                
+                match archive_service.archive_old_messages(archive_days).await {
+                    Ok((friend_count, group_count)) if friend_count > 0 || group_count > 0 => {
+                        tracing::info!(
+                            "📦 消息归档完成: 好友消息 {} 条, 群消息 {} 条",
+                            friend_count, group_count
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!("消息归档失败: {}", e);
+                    }
+                    _ => {}
+                }
+                
+                // 清理过期的消息缓存
+                match archive_service.cleanup_expired_cache().await {
+                    Ok(count) if count > 0 => {
+                        tracing::info!("🧹 消息缓存清理: 清理 {} 条过期缓存", count);
+                    }
+                    Err(e) => {
+                        tracing::warn!("消息缓存清理失败: {}", e);
+                    }
+                    _ => {}
+                }
+            }
+        });
+    }
+
     // 9. 创建路由（使用 AppState 生成各模块所需的 State）
     let app = Router::new()
         // 健康检查
@@ -190,6 +236,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/group-messages",
             create_group_messages_routes(app_state.group_messages_state(), app_state.auth_state()),
         )
+        // WebSocket 路由
+        .merge(ws_routes(app_state.ws_state()))
         // 日志中间件（CORS 由 Nginx 统一处理）
         .layer(tower_http::trace::TraceLayer::new_for_http());
 
@@ -231,6 +279,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("  POST /api/groups/:id/transfer       - 转让群主");
     tracing::info!("  POST /api/group-messages            - 发送群消息");
     tracing::info!("  GET  /api/group-messages            - 获取群消息列表");
+    tracing::info!("  GET  /ws?token=xxx                  - WebSocket 实时连接");
+    tracing::info!("  GET  /ws/status                     - WebSocket 状态查询");
+    tracing::info!("📡 WebSocket 配置:");
+    tracing::info!("   - 已读回执功能: {}", if config.websocket.enable_read_receipt { "开启" } else { "关闭" });
+    tracing::info!("   - 心跳间隔: {}秒", config.websocket.heartbeat_interval_secs);
+    tracing::info!("   - 客户端超时: {}秒", config.websocket.client_timeout_secs);
 
     axum::serve(listener, app).await?;
 

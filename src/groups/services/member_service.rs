@@ -32,10 +32,7 @@ impl MemberService {
         .bind(user_id)
         .fetch_optional(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("查询成员角色失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("查询成员角色失败: {}", e)))?;
 
         Ok(member)
     }
@@ -54,10 +51,7 @@ impl MemberService {
         .bind(user_id)
         .fetch_optional(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("验证成员状态失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("验证成员状态失败: {}", e)))?;
 
         Ok(result.map(|(s,)| s == "active").unwrap_or(false))
     }
@@ -76,10 +70,7 @@ impl MemberService {
         .bind(user_id)
         .fetch_optional(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("验证管理员权限失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("验证管理员权限失败: {}", e)))?;
 
         Ok(result
             .map(|(role, status)| status == "active" && (role == "owner" || role == "admin"))
@@ -100,10 +91,7 @@ impl MemberService {
         .bind(user_id)
         .fetch_optional(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("验证群主权限失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("验证群主权限失败: {}", e)))?;
 
         Ok(result
             .map(|(role, status)| status == "active" && role == "owner")
@@ -133,10 +121,7 @@ impl MemberService {
         .bind(group_id)
         .fetch_all(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("查询群成员列表失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("查询群成员列表失败: {}", e)))?;
 
         let members = rows
             .into_iter()
@@ -196,10 +181,7 @@ impl MemberService {
         .bind(now)
         .execute(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("添加群成员失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("添加群成员失败: {}", e)))?;
 
         Ok(())
     }
@@ -227,10 +209,7 @@ impl MemberService {
         .bind(user_id)
         .execute(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("退出群聊失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("退出群聊失败: {}", e)))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::BadRequest("您不是该群成员".to_string()));
@@ -242,10 +221,7 @@ impl MemberService {
             .bind(user_id)
             .execute(&self.db)
             .await
-            .map_err(|e| {
-                tracing::error!("删除未读消息记录失败: {}", e);
-                AppError::Internal
-            })?;
+            .map_err(|e| AppError::Database(format!("删除未读消息记录失败: {}", e)))?;
 
         Ok(())
     }
@@ -276,10 +252,7 @@ impl MemberService {
         .bind(user_id)
         .execute(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("移除成员失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("移除成员失败: {}", e)))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::BadRequest("该用户不是群成员".to_string()));
@@ -291,10 +264,7 @@ impl MemberService {
             .bind(user_id)
             .execute(&self.db)
             .await
-            .map_err(|e| {
-                tracing::error!("删除未读消息记录失败: {}", e);
-                AppError::Internal
-            })?;
+            .map_err(|e| AppError::Database(format!("删除未读消息记录失败: {}", e)))?;
 
         Ok(())
     }
@@ -312,10 +282,8 @@ impl MemberService {
         new_owner_id: &str,
     ) -> Result<(), AppError> {
         // 开始事务
-        let mut tx = self.db.begin().await.map_err(|e| {
-            tracing::error!("开始事务失败: {}", e);
-            AppError::Internal
-        })?;
+        let mut tx = self.db.begin().await
+            .map_err(|e| AppError::Database(format!("开始事务失败: {}", e)))?;
 
         // 将新群主设为 owner
         let result = sqlx::query(
@@ -326,10 +294,7 @@ impl MemberService {
         .bind(new_owner_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| {
-            tracing::error!("设置新群主失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("设置新群主失败: {}", e)))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::BadRequest("目标用户不是该群成员".to_string()));
@@ -344,16 +309,11 @@ impl MemberService {
         .bind(old_owner_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| {
-            tracing::error!("更新旧群主角色失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("更新旧群主角色失败: {}", e)))?;
 
         // 提交事务
-        tx.commit().await.map_err(|e| {
-            tracing::error!("提交事务失败: {}", e);
-            AppError::Internal
-        })?;
+        tx.commit().await
+            .map_err(|e| AppError::Database(format!("提交事务失败: {}", e)))?;
 
         Ok(())
     }
@@ -372,10 +332,7 @@ impl MemberService {
         .bind(user_id)
         .execute(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("设置管理员失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("设置管理员失败: {}", e)))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::BadRequest("该用户不是普通成员或不存在".to_string()));
@@ -398,10 +355,7 @@ impl MemberService {
         .bind(user_id)
         .execute(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("取消管理员失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("取消管理员失败: {}", e)))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::BadRequest("该用户不是管理员或不存在".to_string()));
@@ -440,10 +394,7 @@ impl MemberService {
         .bind(user_id)
         .execute(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("禁言成员失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("禁言成员失败: {}", e)))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::BadRequest("该用户不是群成员".to_string()));
@@ -469,10 +420,7 @@ impl MemberService {
         .bind(user_id)
         .execute(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("解除禁言失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("解除禁言失败: {}", e)))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::BadRequest("该用户不是群成员".to_string()));
@@ -495,15 +443,43 @@ impl MemberService {
         .bind(user_id)
         .fetch_optional(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("检查禁言状态失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("检查禁言状态失败: {}", e)))?;
 
         match result {
             Some((Some(muted_until),)) => Ok(muted_until > Utc::now()),
             _ => Ok(false),
         }
+    }
+
+    /// 更新群内昵称
+    pub async fn update_nickname(
+        &self,
+        group_id: &Uuid,
+        user_id: &str,
+        nickname: Option<&str>,
+    ) -> Result<(), AppError> {
+        // 处理空字符串为 None
+        let nickname = nickname.and_then(|n| {
+            let trimmed = n.trim();
+            if trimmed.is_empty() { None } else { Some(trimmed) }
+        });
+
+        let result = sqlx::query(
+            r#"UPDATE "group-members" SET "group-nickname" = $1, "updated-at" = NOW()
+               WHERE "group-id" = $2 AND "user-id" = $3 AND "status" = 'active'"#,
+        )
+        .bind(nickname)
+        .bind(group_id)
+        .bind(user_id)
+        .execute(&self.db)
+        .await
+        .map_err(|e| AppError::Database(format!("更新群内昵称失败: {}", e)))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::BadRequest("您不是该群成员".to_string()));
+        }
+
+        Ok(())
     }
 }
 

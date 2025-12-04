@@ -68,7 +68,7 @@ pub async fn invite_members(
         .bind(user_id)
         .fetch_optional(&state.db)
         .await
-        .map_err(|_| AppError::Internal)?;
+        .map_err(|e| AppError::Database(format!("查询用户失败: {}", e)))?;
 
         if user_exists.is_none() {
             results.push(InviteResult {
@@ -98,7 +98,7 @@ pub async fn invite_members(
         .bind(user_id)
         .fetch_optional(&state.db)
         .await
-        .map_err(|_| AppError::Internal)?;
+        .map_err(|e| AppError::Database(format!("查询待处理邀请失败: {}", e)))?;
 
         if existing_request.is_some() {
             results.push(InviteResult {
@@ -137,10 +137,7 @@ pub async fn invite_members(
         .bind(expires_at)
         .execute(&state.db)
         .await
-        .map_err(|e| {
-            tracing::error!("创建邀请记录失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("创建邀请记录失败: {}", e)))?;
 
         results.push(InviteResult {
             user_id: user_id.clone(),

@@ -140,10 +140,7 @@ pub async fn join_by_code(
         .bind(expires_at)
         .execute(&state.db)
         .await
-        .map_err(|e| {
-            tracing::error!("创建入群申请失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("创建入群申请失败: {}", e)))?;
 
         Ok(Json(ApiResponse::success(SuccessResponse::new("申请已提交，等待管理员审核"))))
     }

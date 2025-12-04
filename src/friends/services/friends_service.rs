@@ -42,10 +42,7 @@ pub async fn submit_request(
     .bind(&body.target_user_id)
     .fetch_optional(&state.db)
     .await
-    .map_err(|e| {
-        tracing::error!("查询目标用户失败: {}", e);
-        AppError::Internal
-    })?;
+    .map_err(|e| AppError::Database(format!("查询目标用户失败: {}", e)))?;
 
     if target_exists.is_none() {
         return Err(AppError::BadRequest("目标用户不存在".to_string()));
@@ -60,10 +57,7 @@ pub async fn submit_request(
     .bind(&body.target_user_id)
     .fetch_optional(&state.db)
     .await
-    .map_err(|e| {
-        tracing::error!("查询好友关系失败: {}", e);
-        AppError::Internal
-    })?;
+    .map_err(|e| AppError::Database(format!("查询好友关系失败: {}", e)))?;
 
     if already_friends.is_some() {
         return Err(AppError::BadRequest("已经是好友关系".to_string()));
@@ -78,18 +72,12 @@ pub async fn submit_request(
     .bind(&body.user_id)
     .fetch_optional(&state.db)
     .await
-    .map_err(|e| {
-        tracing::error!("查询反向好友请求失败: {}", e);
-        AppError::Internal
-    })?;
+    .map_err(|e| AppError::Database(format!("查询反向好友请求失败: {}", e)))?;
 
     if let Some((reverse_id,)) = reverse_request {
         // 🔒 使用事务处理自动互通过
         let mut tx = state.db.begin().await
-            .map_err(|e| {
-                tracing::error!("开始事务失败 [自动互通过]: {}", e);
-                AppError::Internal
-            })?;
+            .map_err(|e| AppError::Database(format!("开始事务失败 [自动互通过]: {}", e)))?;
 
         // 更新对方请求为已同意
         sqlx::query(
@@ -99,10 +87,7 @@ pub async fn submit_request(
         .bind(reverse_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| {
-            tracing::error!("更新好友请求状态失败 [自动互通过]: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("更新好友请求状态失败 [自动互通过]: {}", e)))?;
 
         // 建立双向好友关系
         create_friendship_tx(&mut tx, &body.target_user_id, &body.user_id).await?;
@@ -110,10 +95,7 @@ pub async fn submit_request(
 
         // 提交事务
         tx.commit().await
-            .map_err(|e| {
-                tracing::error!("提交事务失败 [自动互通过]: {}", e);
-                AppError::Internal
-            })?;
+            .map_err(|e| AppError::Database(format!("提交事务失败 [自动互通过]: {}", e)))?;
 
         return Ok(SubmitFriendResponse {
             request_id: reverse_id.to_string(),
@@ -129,10 +111,7 @@ pub async fn submit_request(
     .bind(&body.target_user_id)
     .fetch_optional(&state.db)
     .await
-    .map_err(|e| {
-        tracing::error!("查询已有好友请求失败: {}", e);
-        AppError::Internal
-    })?;
+    .map_err(|e| AppError::Database(format!("查询已有好友请求失败: {}", e)))?;
 
     if existing_request.is_some() {
         return Err(AppError::BadRequest("已有待处理的好友请求".to_string()));
@@ -151,10 +130,7 @@ pub async fn submit_request(
     .bind(Utc::now())
     .execute(&state.db)
     .await
-    .map_err(|e| {
-        tracing::error!("创建好友请求失败: {}", e);
-        AppError::Internal
-    })?;
+    .map_err(|e| AppError::Database(format!("创建好友请求失败: {}", e)))?;
 
     Ok(SubmitFriendResponse {
         request_id: request_id.to_string(),
@@ -178,19 +154,13 @@ pub async fn approve_request(
     .bind(&body.user_id)
     .fetch_optional(&state.db)
     .await
-    .map_err(|e| {
-        tracing::error!("查询待处理好友请求失败: {}", e);
-        AppError::Internal
-    })?;
+    .map_err(|e| AppError::Database(format!("查询待处理好友请求失败: {}", e)))?;
 
     let (request_id,) = request.ok_or(AppError::BadRequest("好友请求不存在".to_string()))?;
 
     // 🔒 使用事务处理同意请求
     let mut tx = state.db.begin().await
-        .map_err(|e| {
-            tracing::error!("开始事务失败 [同意好友请求]: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("开始事务失败 [同意好友请求]: {}", e)))?;
 
     // 更新请求状态
     sqlx::query(
@@ -200,10 +170,7 @@ pub async fn approve_request(
     .bind(request_id)
     .execute(&mut *tx)
     .await
-    .map_err(|e| {
-        tracing::error!("更新好友请求状态失败 [同意]: {}", e);
-        AppError::Internal
-    })?;
+    .map_err(|e| AppError::Database(format!("更新好友请求状态失败 [同意]: {}", e)))?;
 
     // 建立双向好友关系
     create_friendship_tx(&mut tx, &body.applicant_user_id, &body.user_id).await?;
@@ -211,10 +178,7 @@ pub async fn approve_request(
 
     // 提交事务
     tx.commit().await
-        .map_err(|e| {
-            tracing::error!("提交事务失败 [同意好友请求]: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("提交事务失败 [同意好友请求]: {}", e)))?;
 
     Ok(())
 }
@@ -239,10 +203,7 @@ pub async fn reject_request(
     .bind(&body.user_id)
     .execute(&state.db)
     .await
-    .map_err(|e| {
-        tracing::error!("更新好友请求状态失败 [拒绝]: {}", e);
-        AppError::Internal
-    })?;
+    .map_err(|e| AppError::Database(format!("更新好友请求状态失败 [拒绝]: {}", e)))?;
 
     if result.rows_affected() == 0 {
         return Err(AppError::BadRequest("好友请求不存在".to_string()));
@@ -263,10 +224,7 @@ pub async fn remove_friend(
 
     // 🔒 使用事务处理删除好友（保证双向一致性）
     let mut tx = state.db.begin().await
-        .map_err(|e| {
-            tracing::error!("开始事务失败 [删除好友]: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("开始事务失败 [删除好友]: {}", e)))?;
 
     // 更新用户方的好友关系状态为 ended
     sqlx::query(
@@ -280,10 +238,7 @@ pub async fn remove_friend(
     .bind(&body.friend_user_id)
     .execute(&mut *tx)
     .await
-    .map_err(|e| {
-        tracing::error!("更新好友关系状态失败 [用户方]: {}", e);
-        AppError::Internal
-    })?;
+    .map_err(|e| AppError::Database(format!("更新好友关系状态失败 [用户方]: {}", e)))?;
 
     // 更新好友方的好友关系状态为 ended
     sqlx::query(
@@ -297,17 +252,11 @@ pub async fn remove_friend(
     .bind(&body.user_id)
     .execute(&mut *tx)
     .await
-    .map_err(|e| {
-        tracing::error!("更新好友关系状态失败 [好友方]: {}", e);
-        AppError::Internal
-    })?;
+    .map_err(|e| AppError::Database(format!("更新好友关系状态失败 [好友方]: {}", e)))?;
 
     // 提交事务
     tx.commit().await
-        .map_err(|e| {
-            tracing::error!("提交事务失败 [删除好友]: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("提交事务失败 [删除好友]: {}", e)))?;
 
     Ok(())
 }
@@ -328,10 +277,7 @@ async fn create_friendship_tx(
     .bind(Utc::now())
     .execute(&mut **tx)
     .await
-    .map_err(|e| {
-        tracing::error!("创建好友关系失败 [user_id={}, friend_id={}]: {}", user_id, friend_id, e);
-        AppError::Internal
-    })?;
+    .map_err(|e| AppError::Database(format!("创建好友关系失败 [user_id={}, friend_id={}]: {}", user_id, friend_id, e)))?;
 
     Ok(())
 }
@@ -346,10 +292,7 @@ pub async fn verify_friendship(db: &PgPool, user_id: &str, friend_id: &str) -> R
     .bind(friend_id)
     .fetch_optional(db)
     .await
-    .map_err(|e| {
-        tracing::error!("验证好友关系失败 [user_id={}, friend_id={}]: {}", user_id, friend_id, e);
-        AppError::Internal
-    })?;
+    .map_err(|e| AppError::Database(format!("验证好友关系失败 [user_id={}, friend_id={}]: {}", user_id, friend_id, e)))?;
 
     Ok(result.is_some())
 }

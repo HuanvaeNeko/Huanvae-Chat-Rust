@@ -115,3 +115,9 @@ pub struct InvitationActionRequest {
     pub action: String,  // "accept" or "decline"
 }
 
+/// 修改群内昵称请求
+#[derive(Debug, Deserialize)]
+pub struct UpdateNicknameRequest {
+    pub nickname: Option<String>,  // None 或空字符串表示清除昵称
+}
+

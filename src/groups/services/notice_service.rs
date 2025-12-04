@@ -43,10 +43,7 @@ impl NoticeService {
         .bind(is_pinned)
         .execute(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("发布公告失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("发布公告失败: {}", e)))?;
 
         Ok(PublishNoticeResponse {
             id: id.to_string(),
@@ -64,10 +61,7 @@ impl NoticeService {
         .bind(group_id)
         .fetch_all(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("查询公告列表失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("查询公告列表失败: {}", e)))?;
 
         // 获取发布者昵称
         let mut result = Vec::new();
@@ -141,10 +135,7 @@ impl NoticeService {
             }
             (None, None, None) => return Ok(()),
         }
-        .map_err(|e| {
-            tracing::error!("更新公告失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("更新公告失败: {}", e)))?;
 
         Ok(())
     }
@@ -169,10 +160,7 @@ impl NoticeService {
         .bind(notice_id)
         .execute(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("删除公告失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("删除公告失败: {}", e)))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::BadRequest("公告不存在".to_string()));

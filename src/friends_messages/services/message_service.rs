@@ -61,20 +61,17 @@ impl MessageService {
         .bind(send_time)
         .execute(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("插入消息失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("插入消息失败: {}", e)))?;
 
         Ok((message_uuid, send_time.to_rfc3339()))
     }
 
-    /// 获取消息列表
+    /// 获取消息列表（优化版：支持时间戳分页，避免子查询）
     pub async fn get_messages(
         &self,
         user_id: &str,
         friend_id: &str,
-        before_uuid: Option<String>,
+        before_time: Option<chrono::DateTime<Utc>>,
         limit: i32,
     ) -> Result<(Vec<MessageResponse>, bool), AppError> {
         // 1. 验证好友关系
@@ -85,9 +82,9 @@ impl MessageService {
         // 2. 生成会话UUID
         let conversation_uuid = generate_conversation_uuid(user_id, friend_id);
 
-        // 3. 查询消息
-        let messages: Vec<Message> = if let Some(before_uuid) = before_uuid {
-            // 分页查询：从指定消息之前查询
+        // 3. 查询消息（使用复合索引 idx-friend-messages-conv-time 优化）
+        let messages: Vec<Message> = if let Some(before) = before_time {
+            // 分页查询：直接使用时间戳，避免子查询
             sqlx::query_as(
                 r#"
                 SELECT "message-uuid", "conversation-uuid", "sender-id", "receiver-id",
@@ -95,9 +92,7 @@ impl MessageService {
                        "is-deleted-by-sender", "is-deleted-by-receiver"
                 FROM "friend-messages"
                 WHERE "conversation-uuid" = $1
-                  AND "send-time" < (
-                      SELECT "send-time" FROM "friend-messages" WHERE "message-uuid" = $2
-                  )
+                  AND "send-time" < $2
                   AND (
                       ("sender-id" = $3 AND "is-deleted-by-sender" = false) OR
                       ("receiver-id" = $3 AND "is-deleted-by-receiver" = false)
@@ -107,9 +102,9 @@ impl MessageService {
                 "#,
             )
             .bind(&conversation_uuid)
-            .bind(&before_uuid)
+            .bind(before)
             .bind(user_id)
-            .bind(limit + 1)  // 多查一条用于判断是否有更多
+            .bind(limit + 1)
             .fetch_all(&self.db)
             .await
         } else {
@@ -135,10 +130,7 @@ impl MessageService {
             .fetch_all(&self.db)
             .await
         }
-        .map_err(|e| {
-            tracing::error!("查询消息失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("查询消息失败: {}", e)))?;
 
         // 4. 判断是否还有更多消息
         let has_more = messages.len() > limit as usize;
@@ -160,7 +152,7 @@ impl MessageService {
         .bind(message_uuid)
         .fetch_optional(&self.db)
         .await
-        .map_err(|_| AppError::Internal)?;
+        .map_err(|e| AppError::Database(format!("查询消息失败: {}", e)))?;
 
         let (sender_id, receiver_id) = message.ok_or(AppError::BadRequest("消息不存在".to_string()))?;
 
@@ -184,7 +176,7 @@ impl MessageService {
         } else {
             return Err(AppError::Forbidden);
         }
-        .map_err(|_| AppError::Internal)?;
+        .map_err(|e| AppError::Database(format!("删除消息失败: {}", e)))?;
 
         Ok(())
     }
@@ -198,7 +190,7 @@ impl MessageService {
         .bind(message_uuid)
         .fetch_optional(&self.db)
         .await
-        .map_err(|_| AppError::Internal)?;
+        .map_err(|e| AppError::Database(format!("查询消息失败: {}", e)))?;
 
         let (sender_id, send_time) = message.ok_or(AppError::BadRequest("消息不存在".to_string()))?;
 
@@ -230,7 +222,7 @@ impl MessageService {
         .bind(message_uuid)
         .execute(&self.db)
         .await
-        .map_err(|_| AppError::Internal)?;
+        .map_err(|e| AppError::Database(format!("撤回消息失败: {}", e)))?;
 
         Ok(())
     }

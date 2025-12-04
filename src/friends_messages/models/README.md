@@ -32,7 +32,7 @@
 
 - `GetMessagesRequest` - 获取消息列表请求（通过查询参数传递）
   - `friend_id`: 好友用户ID
-  - `before_uuid`: 可选，分页起点消息UUID
+  - `before_time`: 可选，时间戳分页（ISO 8601 格式）
   - `limit`: 可选，返回消息数量（默认50，最大500）
 
 - `DeleteMessageRequest` - 删除消息请求

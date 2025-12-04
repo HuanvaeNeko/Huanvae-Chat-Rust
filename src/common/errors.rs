@@ -163,15 +163,6 @@ impl From<jsonwebtoken::errors::Error> for AppError {
     }
 }
 
-/// 从 anyhow::Error 转换
-impl From<anyhow::Error> for AppError {
-    fn from(_err: anyhow::Error) -> Self {
-        // 默认作为内部错误处理
-        AppError::Internal
-    }
-}
-
-
 #[cfg(test)]
 mod tests {
     use super::*;

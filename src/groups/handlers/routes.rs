@@ -9,7 +9,7 @@ use super::state::GroupsState;
 use super::{
     create_group::create_group,
     get_group::{get_group_info, get_my_groups, search_groups},
-    update_group::{update_group_info, update_join_mode},
+    update_group::{update_group_info, update_join_mode, upload_group_avatar, update_member_nickname},
     disband_group::disband_group,
     members::{get_members, invite_members, leave_group, remove_member},
     roles::{transfer_owner, set_admin, remove_admin},
@@ -36,6 +36,8 @@ pub fn create_group_routes(state: GroupsState, auth_state: AuthState) -> Router 
         .route("/{group_id}", put(update_group_info))
         .route("/{group_id}", delete(disband_group))
         .route("/{group_id}/join_mode", put(update_join_mode))
+        .route("/{group_id}/avatar", post(upload_group_avatar))
+        .route("/{group_id}/nickname", put(update_member_nickname))
         
         // 成员管理
         .route("/{group_id}/members", get(get_members))

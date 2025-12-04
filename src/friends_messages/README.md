@@ -70,14 +70,16 @@ src/friends_messages/
 
 ### 2. 获取消息列表
 
-**端点**: `GET /api/messages?friend_id={friend_id}&before_uuid={uuid}&limit={limit}`
+**端点**: `GET /api/messages?friend_id={friend_id}&before_time={time}&limit={limit}`
 
 **需要鉴权**: ✅ 是
 
 **查询参数**:
 - `friend_id` (必填) - 好友的用户ID
-- `before_uuid` (可选) - 从这条消息之前查询（分页）
+- `before_time` (可选) - 时间戳分页，ISO 8601 格式
 - `limit` (可选) - 返回条数，默认 50，最大 500
+
+> 💡 **性能优化**: 使用时间戳分页，直接使用复合索引 `(conversation-uuid, send-time DESC)`
 
 **响应示例**:
 ```json
@@ -338,22 +340,29 @@ pub enum AppError {
 
 ### 数据库索引
 
-- ✅ 会话+时间复合索引，优化消息列表查询
+- ✅ `idx-friend-messages-conv-time`: 会话+时间复合索引，优化消息列表查询
 - ✅ 发送者/接收者索引，支持按用户查询
 - ✅ 时间索引，支持时间范围查询
 
 ### 查询优化
 
+- ✅ **时间戳分页**: 直接使用 `before_time` 参数，避免子查询（性能提升约 30-50%）
 - ✅ 使用 `LIMIT` 限制返回数量
 - ✅ 分页查询避免一次性加载大量数据
 - ✅ 软删除过滤在 SQL 层完成
 
+### 消息归档
+
+- ✅ 归档表 `friend-messages-archive` 存储历史消息
+- ✅ 默认归档 30 天前的消息
+- ✅ 自动定时归档任务（每 24 小时检查一次）
+
 ### 扩展性考虑
 
+- ✅ WebSocket 实时推送已实现
+- ✅ 未读消息统计已实现
 - 🔄 未来可添加消息已读状态
 - 🔄 未来可添加消息搜索功能
-- 🔄 未来可添加消息统计（未读数）
-- 🔄 未来可添加 WebSocket 实时推送
 
 ---
 

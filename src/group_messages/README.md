@@ -112,12 +112,14 @@ src/group_messages/
 
 ### 2. 获取群消息列表
 
-**端点**: `GET /api/group-messages?group_id=xxx&before_uuid=xxx&limit=50`
+**端点**: `GET /api/group-messages?group_id=xxx&before_time=xxx&limit=50`
 
 **参数**:
 - `group_id` (必填) - 群聊ID
-- `before_uuid` (可选) - 从这条消息之前查询（分页）
+- `before_time` (可选) - 时间戳分页，ISO 8601 格式
 - `limit` (可选) - 返回条数，默认 50，最大 500
+
+> 💡 **性能优化**: 使用 JOIN 一次性获取消息和发送者信息，消除 N+1 查询问题
 
 **响应**:
 ```json
@@ -229,4 +231,31 @@ curl -X POST "http://localhost:8080/api/group-messages" \
     "reply_to": "660e8400-e29b-41d4-a716-446655440001"
   }'
 ```
+
+## ⚡ 性能优化
+
+### 数据库索引
+
+| 索引名 | 字段 | 用途 |
+|-------|------|------|
+| `idx-group-messages-group-time` | `(group-id, send-time DESC)` | 消息列表分页查询 |
+| `idx-group-messages-sender-time` | `(sender-id, send-time DESC)` | JOIN 发送者信息 |
+
+### 查询优化
+
+1. **JOIN 优化**: 一次性获取消息和发送者信息，消除 N+1 查询问题
+2. **时间戳分页**: 直接使用 `before_time` 参数，避免子查询
+3. **复合索引**: 使用 `(group-id, send-time DESC)` 复合索引优化查询
+
+### 消息归档
+
+- 归档表 `group-messages-archive` 存储历史消息
+- 默认归档 30 天前的消息
+- 自动定时归档任务（每 24 小时检查一次）
+
+### 消息缓存（可选）
+
+- 缓存表 `group-message-cache` 存储热点群的最近消息
+- JSONB 格式存储，支持快速读取
+- TTL 过期自动清理
 

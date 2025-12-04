@@ -91,7 +91,7 @@ pub async fn get_messages(
     &self,
     user_id: &str,
     friend_id: &str,
-    before_uuid: Option<String>,
+    before_time: Option<DateTime<Utc>>,
     limit: i32,
 ) -> Result<(Vec<MessageResponse>, bool), AppError>
 ```
@@ -99,7 +99,7 @@ pub async fn get_messages(
 流程：
 1. 验证双方是否为好友关系
 2. 生成会话UUID
-3. 根据是否提供 `before_uuid` 进行分页查询
+3. 根据是否提供 `before_time` 进行分页查询（直接使用复合索引）
 4. 过滤已删除的消息（根据查询者身份）
 5. 按 `send-time` 降序排列
 6. 返回消息列表和是否有更多消息的标记

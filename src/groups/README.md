@@ -47,7 +47,9 @@ src/groups/
 | GET | `/api/groups/:group_id` | 获取群聊信息 |
 | PUT | `/api/groups/:group_id` | 更新群聊信息 |
 | DELETE | `/api/groups/:group_id` | 解散群聊（仅群主） |
-| PUT | `/api/groups/:group_id/join-mode` | 修改入群模式（仅群主） |
+| PUT | `/api/groups/:group_id/join_mode` | 修改入群模式（仅群主） |
+| POST | `/api/groups/:group_id/avatar` | 上传群头像（群主/管理员） |
+| PUT | `/api/groups/:group_id/nickname` | 修改群内昵称（群成员） |
 
 ### 成员管理
 
@@ -127,6 +129,7 @@ src/groups/
 | group-id | UUID | 群聊ID |
 | user-id | TEXT | 用户ID |
 | role | TEXT | 角色：owner/admin/member |
+| group-nickname | TEXT | 群内昵称（可选） |
 | join-method | TEXT | 入群方式 |
 | status | TEXT | 状态：active/removed/left |
 | muted-until | TIMESTAMPTZ | 禁言截止时间 |
@@ -160,6 +163,8 @@ src/groups/
 |------|-----|-------|---------|
 | 修改群信息 | ✅ | ✅ | ❌ |
 | 修改入群模式 | ✅ | ❌ | ❌ |
+| 上传群头像 | ✅ | ✅ | ❌ |
+| 修改群内昵称 | ✅ | ✅ | ✅ |
 | 邀请成员（直接） | ✅ | ✅ | ❌ |
 | 邀请成员（需审核） | - | - | ✅ |
 | 生成直通邀请码 | ✅ | ✅ | ❌ |
@@ -232,4 +237,25 @@ curl -X POST http://localhost:8080/api/groups/{group_id}/transfer \
     "new_owner_id": "user_b"
   }'
 ```
+
+### 上传群头像
+
+```bash
+curl -X POST http://localhost:8080/api/groups/{group_id}/avatar \
+  -H "Authorization: Bearer <token>" \
+  -F "avatar=@/path/to/image.jpg"
+```
+
+### 修改群内昵称
+
+```bash
+curl -X PUT http://localhost:8080/api/groups/{group_id}/nickname \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "nickname": "我在这个群的昵称"
+  }'
+```
+
+> **说明**: `nickname` 设为 `null` 或空字符串表示清除群内昵称，恢复显示用户全局昵称。
 

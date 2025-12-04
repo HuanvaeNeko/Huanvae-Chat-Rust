@@ -18,7 +18,8 @@ pub struct SendGroupMessageRequest {
 #[derive(Debug, Deserialize)]
 pub struct GetGroupMessagesQuery {
     pub group_id: String,
-    pub before_uuid: Option<String>,
+    /// 分页：从指定时间戳之前查询（ISO 8601 格式）
+    pub before_time: Option<String>,
     pub limit: Option<i32>,
 }
 
@@ -33,4 +34,3 @@ pub struct DeleteGroupMessageRequest {
 pub struct RecallGroupMessageRequest {
     pub message_uuid: String,
 }
-

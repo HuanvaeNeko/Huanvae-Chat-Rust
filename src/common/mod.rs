@@ -4,12 +4,15 @@
 //! - `AppError` - 统一错误类型
 //! - `ApiResponse` - 统一 API 响应格式
 //! - `generate_conversation_uuid` - 生成会话唯一标识
+//! - `MessageArchiveService` - 消息归档服务
 
 mod errors;
 mod response;
+mod message_archive_service;
 
 pub use errors::AppError;
 pub use response::ApiResponse;
+pub use message_archive_service::MessageArchiveService;
 
 /// 生成会话UUID（双方用户ID排序后组合）
 ///

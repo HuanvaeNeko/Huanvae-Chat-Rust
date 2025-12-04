@@ -25,7 +25,7 @@ pub async fn list_owned_friends_handler(
     .bind(&auth.user_id)
     .fetch_all(&state.db)
     .await
-    .map_err(|_| AppError::Internal)?;
+    .map_err(|e| AppError::Database(format!("查询好友列表失败: {}", e)))?;
 
     let items = friends
         .into_iter()

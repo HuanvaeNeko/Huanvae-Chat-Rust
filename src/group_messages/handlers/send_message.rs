@@ -1,6 +1,7 @@
 //! 发送群消息处理器
 
 use axum::{extract::State, Extension, Json};
+use chrono::Utc;
 use uuid::Uuid;
 use crate::auth::middleware::AuthContext;
 use crate::common::{ApiResponse, AppError};
@@ -50,6 +51,58 @@ pub async fn send_message(
         req.file_size,
         reply_to.as_ref(),
     ).await?;
+
+    // 发送 WebSocket 实时通知
+    if let Some(ref notification_service) = state.notification_service {
+        // 获取发送者昵称和群名称
+        let sender_info: Option<(Option<String>,)> = sqlx::query_as(
+            r#"SELECT "user-nickname" FROM "users" WHERE "user-id" = $1"#,
+        )
+        .bind(&auth.user_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten();
+
+        let group_info: Option<(Option<String>,)> = sqlx::query_as(
+            r#"SELECT "group-name" FROM "groups" WHERE "group-id" = $1"#,
+        )
+        .bind(&group_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten();
+
+        let sender_nickname = sender_info
+            .and_then(|(n,)| n)
+            .unwrap_or_else(|| auth.user_id.clone());
+        let group_name = group_info
+            .and_then(|(n,)| n)
+            .unwrap_or_else(|| "群聊".to_string());
+
+        let message_uuid = Uuid::parse_str(&response.message_uuid).ok();
+        let send_time_dt = chrono::DateTime::parse_from_rfc3339(&response.send_time)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+
+        if let Some(msg_uuid) = message_uuid {
+            if let Err(e) = notification_service
+                .notify_group_message(
+                    &group_id,
+                    &group_name,
+                    &auth.user_id,
+                    &sender_nickname,
+                    &msg_uuid,
+                    &req.message_content,
+                    message_type,
+                    send_time_dt,
+                )
+                .await
+            {
+                tracing::warn!("发送群消息通知失败: {}", e);
+            }
+        }
+    }
 
     Ok(Json(ApiResponse::success(response)))
 }

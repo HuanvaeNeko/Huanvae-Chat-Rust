@@ -56,6 +56,8 @@
 ### 群聊系统
 - [群聊管理](./groups/群聊管理.md)
   - 创建/解散群聊
+  - 群设置（修改群名称、上传群头像）
+  - 群内昵称管理
   - 成员管理（邀请、移除、退出）
   - 角色管理（群主、管理员）
   - 禁言管理
@@ -83,8 +85,8 @@
 ### API 基础地址
 
 ```js
-// 开发环境
-const BASE = 'http://localhost:8080';
+// 开发环境（通过 Nginx 代理）
+const BASE = 'http://localhost';
 
 // 生产环境
 const BASE = 'https://api.huanvae.com';
@@ -201,7 +203,7 @@ async function refreshToken() {
 | 方法 | 端点 | 说明 |
 |------|------|------|
 | POST | `/api/messages` | 发送消息 |
-| GET | `/api/messages` | 获取消息列表 |
+| GET | `/api/messages` | 获取消息列表（`before_time` 时间戳分页） |
 | DELETE | `/api/messages/delete` | 删除消息 |
 | POST | `/api/messages/recall` | 撤回消息 |
 
@@ -212,7 +214,9 @@ async function refreshToken() {
 | GET | `/api/groups/my` | 获取我的群聊 |
 | GET | `/api/groups/search` | 搜索群聊 |
 | GET | `/api/groups/{id}` | 获取群详情 |
-| PUT | `/api/groups/{id}` | 更新群信息 |
+| PUT | `/api/groups/{id}` | 更新群信息（名称、简介） |
+| POST | `/api/groups/{id}/avatar` | 上传群头像 |
+| PUT | `/api/groups/{id}/nickname` | 修改我的群内昵称 |
 | DELETE | `/api/groups/{id}` | 解散群聊 |
 | PUT | `/api/groups/{id}/join-mode` | 修改入群模式 |
 | GET | `/api/groups/{id}/members` | 获取成员列表 |
@@ -244,7 +248,7 @@ async function refreshToken() {
 | 方法 | 端点 | 说明 |
 |------|------|------|
 | POST | `/api/group-messages` | 发送群消息 |
-| GET | `/api/group-messages` | 获取群消息列表 |
+| GET | `/api/group-messages` | 获取群消息列表（`before_time` 时间戳分页，JOIN 优化） |
 | DELETE | `/api/group-messages/delete` | 删除消息（个人） |
 | POST | `/api/group-messages/recall` | 撤回消息 |
 
@@ -264,13 +268,20 @@ async function refreshToken() {
 2. **Token 过期**：Access Token 有效期 15 分钟，需及时刷新
 3. **错误处理**：始终处理 API 调用的错误情况
 4. **文件大小限制**：
-   - 头像：最大 5MB
+   - 头像：最大 10MB（用户头像、群头像）
    - 普通文件：根据配置
 5. **消息撤回**：普通用户只能撤回 2 分钟内的消息
-6. **实时消息**：建议使用 WebSocket 实现实时推送
+6. **实时消息**：已支持 WebSocket 实时推送
+7. **消息分页**：使用 `before_time` 时间戳分页
+8. **消息归档**：30天前的历史消息会自动归档，仍可正常查询
 
 ## 📝 更新日志
 
+- **2025-12-04**：
+  - 消息查询接口新增 `before_time` 时间戳分页参数（性能优化）
+  - 群消息查询使用 JOIN 优化，一次性获取发送者信息
+  - 新增消息归档功能（30天自动归档）
+  - 新增群头像上传、群内昵称修改接口
 - **2025-12-03**：新增群聊系统和群消息接口文档
 - **2025-11-25**：初始版本，包含认证、好友、消息、文件存储接口
 

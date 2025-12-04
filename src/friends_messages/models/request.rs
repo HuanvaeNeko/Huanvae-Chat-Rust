@@ -22,8 +22,10 @@ pub struct SendMessageRequest {
 #[derive(Debug, Deserialize)]
 pub struct GetMessagesQuery {
     pub friend_id: String,
-    pub before_uuid: Option<String>,  // 分页：从这条消息之前查询
-    pub limit: Option<i32>,            // 默认50，最大500
+    /// 分页：从指定时间戳之前查询（ISO 8601 格式）
+    pub before_time: Option<String>,
+    /// 默认50，最大500
+    pub limit: Option<i32>,
 }
 
 /// 删除消息请求
@@ -39,4 +41,3 @@ pub struct RecallMessageRequest {
     #[validate(length(min = 1))]
     pub message_uuid: String,
 }
-

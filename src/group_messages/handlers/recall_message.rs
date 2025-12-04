@@ -24,7 +24,7 @@ pub async fn recall_message(
     .bind(message_uuid)
     .fetch_optional(&state.db)
     .await
-    .map_err(|_| AppError::Internal)?;
+    .map_err(|e| AppError::Database(format!("查询消息失败: {}", e)))?;
 
     let (group_id,) = group_id.ok_or_else(|| AppError::BadRequest("消息不存在".to_string()))?;
 

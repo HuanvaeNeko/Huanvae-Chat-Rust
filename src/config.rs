@@ -99,12 +99,21 @@ impl StorageConfig {
 pub struct MessageConfig {
     /// 消息撤回窗口（秒），默认 120 (2分钟)
     pub recall_window: u64,
+    /// 消息归档天数（多少天前的消息归档），默认 30 天
+    pub archive_days: i32,
+    /// 消息归档检查间隔（秒），默认 86400 (24小时)
+    pub archive_interval_secs: u64,
+    /// 消息缓存 TTL（秒），默认 3600 (1小时)
+    pub cache_ttl_secs: u64,
 }
 
 impl Default for MessageConfig {
     fn default() -> Self {
         Self {
-            recall_window: 120, // 2分钟
+            recall_window: 120,          // 2分钟
+            archive_days: 30,            // 30天
+            archive_interval_secs: 86400, // 24小时
+            cache_ttl_secs: 3600,        // 1小时
         }
     }
 }
@@ -117,6 +126,18 @@ impl MessageConfig {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(120),
+            archive_days: env::var("MESSAGE_ARCHIVE_DAYS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(30),
+            archive_interval_secs: env::var("MESSAGE_ARCHIVE_INTERVAL_SECONDS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(86400),
+            cache_ttl_secs: env::var("MESSAGE_CACHE_TTL_SECONDS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(3600),
         }
     }
 }
@@ -304,6 +325,48 @@ pub struct CleanupConfig {
     pub check_cleanup_interval_secs: u64,
 }
 
+/// WebSocket 相关配置
+#[derive(Clone, Debug)]
+pub struct WebSocketConfig {
+    /// 是否启用已读回执功能，默认 true
+    /// 关闭后仍会记录已读状态，但不会通知对方
+    pub enable_read_receipt: bool,
+    /// 心跳间隔（秒），默认 30
+    pub heartbeat_interval_secs: u64,
+    /// 客户端超时（秒），默认 60
+    pub client_timeout_secs: u64,
+}
+
+impl Default for WebSocketConfig {
+    fn default() -> Self {
+        Self {
+            enable_read_receipt: true,
+            heartbeat_interval_secs: 30,
+            client_timeout_secs: 60,
+        }
+    }
+}
+
+impl WebSocketConfig {
+    /// 从环境变量加载配置
+    pub fn from_env() -> Self {
+        Self {
+            enable_read_receipt: env::var("WS_ENABLE_READ_RECEIPT")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(true),
+            heartbeat_interval_secs: env::var("WS_HEARTBEAT_INTERVAL_SECONDS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(30),
+            client_timeout_secs: env::var("WS_CLIENT_TIMEOUT_SECONDS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(60),
+        }
+    }
+}
+
 impl Default for CleanupConfig {
     fn default() -> Self {
         Self {
@@ -355,6 +418,8 @@ pub struct AppConfig {
     pub cleanup: CleanupConfig,
     /// MinIO/S3 存储服务配置
     pub minio: MinioConfig,
+    /// WebSocket 配置
+    pub websocket: WebSocketConfig,
 }
 
 impl Default for AppConfig {
@@ -369,6 +434,7 @@ impl Default for AppConfig {
             jwt: JwtConfig::default(),
             cleanup: CleanupConfig::default(),
             minio: MinioConfig::default(),
+            websocket: WebSocketConfig::default(),
         }
     }
 }
@@ -387,6 +453,7 @@ impl AppConfig {
             jwt: JwtConfig::from_env(),
             cleanup: CleanupConfig::from_env(),
             minio: MinioConfig::from_env().unwrap_or_default(),
+            websocket: WebSocketConfig::from_env(),
         }
     }
 }
@@ -437,6 +504,11 @@ pub fn jwt_config() -> &'static JwtConfig {
 /// 获取清理任务配置
 pub fn cleanup_config() -> &'static CleanupConfig {
     &get_config().cleanup
+}
+
+/// 获取 WebSocket 配置
+pub fn websocket_config() -> &'static WebSocketConfig {
+    &get_config().websocket
 }
 
 #[cfg(test)]

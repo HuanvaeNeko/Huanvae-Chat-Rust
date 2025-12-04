@@ -59,13 +59,13 @@
 
 查询参数：
 - `friend_id` - 必需，好友用户ID
-- `before_uuid` - 可选，分页起点消息UUID
+- `before_time` - 可选，时间戳分页（ISO 8601 格式）
 - `limit` - 可选，返回数量（默认50，最大500）
 
 示例：
 ```
 GET /api/messages?friend_id=user456&limit=50
-GET /api/messages?friend_id=user456&before_uuid=550e8400-e29b-41d4-a716-446655440000&limit=50
+GET /api/messages?friend_id=user456&before_time=2025-12-04T14:00:00%2B00:00&limit=50
 ```
 
 响应：

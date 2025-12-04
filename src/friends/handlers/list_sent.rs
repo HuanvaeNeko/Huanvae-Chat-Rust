@@ -25,7 +25,7 @@ pub async fn list_sent_requests_handler(
     .bind(&auth.user_id)
     .fetch_all(&state.db)
     .await
-    .map_err(|_| AppError::Internal)?;
+    .map_err(|e| AppError::Database(format!("查询已发送好友请求失败: {}", e)))?;
 
     let items = requests
         .into_iter()

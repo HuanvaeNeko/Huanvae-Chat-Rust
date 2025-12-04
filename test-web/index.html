@@ -48,6 +48,12 @@
       </nav>
       
       <div class="sidebar-footer">
+        <!-- WebSocket 状态指示器 -->
+        <div class="ws-status" title="实时消息连接状态" onclick="toggleWsConnection()">
+          <span id="wsStatusIndicator" class="ws-status-indicator disconnected"></span>
+          <span id="wsStatusText" class="ws-status-text">未连接</span>
+        </div>
+        
         <button class="nav-btn" onclick="showSettingsModal()" title="设置">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="3"/>

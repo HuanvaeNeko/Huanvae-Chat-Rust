@@ -25,14 +25,6 @@ pub struct User {
     #[sqlx(rename = "admin")]
     pub admin: String,
 
-    #[serde(rename = "user-joined-group-chats")]
-    #[sqlx(rename = "user-joined-group-chats")]
-    pub user_joined_group_chats: String,
-
-    #[serde(rename = "user-ai-conversation-data")]
-    #[sqlx(rename = "user-ai-conversation-data")]
-    pub user_ai_conversation_data: String,
-
     #[serde(rename = "need-blacklist-check")]
     #[sqlx(rename = "need-blacklist-check")]
     pub need_blacklist_check: bool,

@@ -195,9 +195,73 @@ body {
 }
 
 .sidebar-footer {
-  padding: 16px;
+  padding: 12px;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+/* WebSocket 状态指示器 */
+.ws-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.ws-status:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.ws-status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transition: var(--transition-fast);
+}
+
+.ws-status-indicator.connected {
+  background: var(--success);
+  box-shadow: 0 0 6px var(--success);
+  animation: pulse 2s infinite;
+}
+
+.ws-status-indicator.disconnected {
+  background: var(--text-tertiary);
+}
+
+.ws-status-indicator.connecting {
+  background: var(--warning);
+  animation: blink 1s infinite;
+}
+
+.ws-status-text {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
 }
 
 /* 列表面板 */
@@ -395,6 +459,22 @@ body {
   margin-top: 4px;
 }
 
+/* 未读消息角标 */
+.unread-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  background: var(--error, #ef4444);
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 9px;
+  margin-top: 4px;
+}
+
 .item-actions {
   display: flex;
   gap: 4px;
@@ -566,6 +646,35 @@ body {
   gap: 16px;
 }
 
+/* 加载更多历史消息按钮 */
+.load-more-container {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0;
+  margin-bottom: 8px;
+}
+
+.load-more-btn {
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 8px 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.load-more-btn:hover {
+  background: var(--primary-light);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.load-more-btn:active {
+  transform: scale(0.98);
+}
+
 .message-loading {
   display: flex;
   align-items: center;
@@ -686,13 +795,47 @@ body {
 
 .message-image {
   max-width: 240px;
+  min-width: 100px;
+  min-height: 60px;
   border-radius: 8px;
   cursor: pointer;
+  background: var(--bg-base);
+  display: block;
+}
+
+.message-image[data-loaded="false"] {
+  background: linear-gradient(90deg, var(--bg-base) 25%, var(--bg-sidebar-hover) 50%, var(--bg-base) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
 }
 
 .message-video {
   max-width: 320px;
+  min-width: 200px;
+  min-height: 120px;
   border-radius: 8px;
+  background: var(--bg-base);
+}
+
+.message-video[data-loaded="false"] {
+  background: linear-gradient(90deg, var(--bg-base) 25%, var(--bg-sidebar-hover) 50%, var(--bg-base) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+.video-error {
+  padding: 12px 16px;
+  background: rgba(255, 0, 0, 0.1);
+  color: var(--error);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
 
 .message-time {

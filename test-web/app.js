@@ -23,14 +23,21 @@ const state = {
   conversations: [],
   messages: {},  // { chatId: [...messages] }
   groupMembers: {},  // { groupId: [...members] }
+  
+  // WebSocket 相关
+  ws: null,           // WebSocket 实例
+  wsConnected: false, // 连接状态
+  wsReconnectTimer: null, // 重连定时器
+  wsPingInterval: null,   // 心跳定时器
+  unreadSummary: null,    // 未读消息摘要
 };
 
 // ==========================================
 // 工具函数
 // ==========================================
 
-// API 请求封装
-async function api(path, { method = 'GET', body, formData, token = state.accessToken } = {}) {
+// API 请求封装（带自动 Token 刷新）
+async function api(path, { method = 'GET', body, formData, token = state.accessToken, _retried = false } = {}) {
   const headers = {};
   
   if (body) {
@@ -60,6 +67,16 @@ async function api(path, { method = 'GET', body, formData, token = state.accessT
   } else {
     const text = await res.text().catch(() => '');
     data = text ? { message: text } : {};
+  }
+  
+  // 401 错误且未重试过 → 尝试刷新 Token 并重试
+  if (res.status === 401 && !_retried && state.refreshToken) {
+    console.log('🔄 收到 401，尝试刷新 Token 后重试...');
+    const refreshed = await refreshTokenRequest();
+    if (refreshed) {
+      // 用新 Token 重试请求
+      return api(path, { method, body, formData, token: state.accessToken, _retried: true });
+    }
   }
   
   if (!res.ok) {
@@ -158,11 +175,486 @@ function closeModal(id) {
 }
 
 // ==========================================
+// WebSocket 实时通信
+// ==========================================
+
+// WebSocket 连接地址（ws 或 wss）
+const WS_URL = BASE_URL.replace(/^http/, 'ws') + '/ws';
+
+// 连接 WebSocket
+async function connectWebSocket() {
+  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+    console.log('📡 WebSocket 已连接');
+    return;
+  }
+  
+  if (!state.accessToken) {
+    console.log('📡 无 Token，跳过 WebSocket 连接');
+    return;
+  }
+  
+  // 确保 Token 有效
+  const claims = decodeJwt(state.accessToken);
+  if (!claims || claims.exp * 1000 < Date.now()) {
+    console.log('📡 Token 已过期，尝试刷新...');
+    if (state.refreshToken) {
+      const refreshed = await refreshTokenRequest();
+      if (!refreshed) {
+        console.log('📡 Token 刷新失败，无法连接 WebSocket');
+        return;
+      }
+    } else {
+      console.log('📡 无 Refresh Token，无法连接 WebSocket');
+      return;
+    }
+  }
+  
+  const url = `${WS_URL}?token=${encodeURIComponent(state.accessToken)}`;
+  console.log('📡 正在连接 WebSocket...');
+  
+  try {
+    state.ws = new WebSocket(url);
+    
+    state.ws.onopen = () => {
+      console.log('📡 WebSocket 连接成功');
+      state.wsConnected = true;
+      updateWsStatus(true);
+      
+      // 清除重连定时器
+      if (state.wsReconnectTimer) {
+        clearTimeout(state.wsReconnectTimer);
+        state.wsReconnectTimer = null;
+      }
+      
+      // 启动心跳定时器（每 25 秒发送一次 ping，后端超时是 60 秒）
+      if (state.wsPingInterval) {
+        clearInterval(state.wsPingInterval);
+      }
+      state.wsPingInterval = setInterval(() => {
+        wsSendPing();
+      }, 25000);
+    };
+    
+    state.ws.onclose = (e) => {
+      console.log(`📡 WebSocket 连接关闭: ${e.code} ${e.reason}`);
+      state.wsConnected = false;
+      state.ws = null;
+      updateWsStatus(false);
+      
+      // 清除心跳定时器
+      if (state.wsPingInterval) {
+        clearInterval(state.wsPingInterval);
+        state.wsPingInterval = null;
+      }
+      
+      // 自动重连（如果有 token）
+      if (state.accessToken && !state.wsReconnectTimer) {
+        console.log('📡 将在 5 秒后尝试重连...');
+        state.wsReconnectTimer = setTimeout(() => {
+          state.wsReconnectTimer = null;
+          connectWebSocket();
+        }, 5000);
+      }
+    };
+    
+    state.ws.onerror = (e) => {
+      console.error('📡 WebSocket 错误:', e);
+    };
+    
+    state.ws.onmessage = (event) => {
+      handleWsMessage(event.data);
+    };
+    
+  } catch (err) {
+    console.error('📡 WebSocket 连接失败:', err);
+    updateWsStatus(false);
+  }
+}
+
+// 断开 WebSocket
+function disconnectWebSocket() {
+  // 清除心跳定时器
+  if (state.wsPingInterval) {
+    clearInterval(state.wsPingInterval);
+    state.wsPingInterval = null;
+  }
+  
+  // 清除重连定时器
+  if (state.wsReconnectTimer) {
+    clearTimeout(state.wsReconnectTimer);
+    state.wsReconnectTimer = null;
+  }
+  
+  if (state.ws) {
+    state.ws.close();
+    state.ws = null;
+  }
+  
+  state.wsConnected = false;
+  updateWsStatus(false);
+  console.log('📡 WebSocket 已断开');
+}
+
+// 处理 WebSocket 消息
+function handleWsMessage(data) {
+  try {
+    const msg = JSON.parse(data);
+    console.log('📨 收到 WebSocket 消息:', msg.type, msg);
+    
+    switch (msg.type) {
+      case 'connected':
+        handleWsConnected(msg);
+        break;
+        
+      case 'new_message':
+        handleWsNewMessage(msg);
+        break;
+        
+      case 'message_recalled':
+        handleWsMessageRecalled(msg);
+        break;
+        
+      case 'read_sync':
+        handleWsReadSync(msg);
+        break;
+        
+      case 'system_notification':
+        handleWsSystemNotification(msg);
+        break;
+        
+      case 'pong':
+        // 心跳响应，忽略
+        break;
+        
+      case 'error':
+        console.error('📡 WebSocket 错误:', msg.code, msg.message);
+        showToast(`WebSocket: ${msg.message}`, 'error');
+        break;
+        
+      default:
+        console.log('📡 未知消息类型:', msg.type);
+    }
+  } catch (err) {
+    console.error('📡 解析消息失败:', err);
+  }
+}
+
+// 处理连接成功消息
+function handleWsConnected(msg) {
+  state.unreadSummary = msg.unread_summary;
+  
+  // 更新未读角标
+  const totalUnread = msg.unread_summary.total_count || 0;
+  updateUnreadBadge(totalUnread);
+  
+  // 更新 state.conversations 中的未读数
+  if (msg.unread_summary.friend_unreads) {
+    msg.unread_summary.friend_unreads.forEach(u => {
+      const conv = state.conversations.find(c => c.type === 'friend' && c.id === u.friend_id);
+      if (conv) {
+        conv.unreadCount = u.unread_count;
+        conv.lastMessage = u.last_message_preview;
+        conv.time = u.last_message_time;
+      }
+    });
+  }
+  
+  if (msg.unread_summary.group_unreads) {
+    msg.unread_summary.group_unreads.forEach(u => {
+      const conv = state.conversations.find(c => c.type === 'group' && c.id === u.group_id);
+      if (conv) {
+        conv.unreadCount = u.unread_count;
+        conv.lastMessage = u.last_message_preview;
+        conv.time = u.last_message_time;
+      }
+    });
+  }
+  
+  // 按未读数和时间排序会话列表
+  state.conversations.sort((a, b) => {
+    // 有未读的排前面
+    if ((b.unreadCount || 0) !== (a.unreadCount || 0)) {
+      return (b.unreadCount || 0) - (a.unreadCount || 0);
+    }
+    // 时间新的排前面
+    return new Date(b.time || 0) - new Date(a.time || 0);
+  });
+  
+  // 重新渲染会话列表（带未读角标）
+  renderConversations();
+  
+  showToast('实时消息已连接', 'success');
+}
+
+// 处理新消息通知
+function handleWsNewMessage(msg) {
+  const { source_type, source_id, message_uuid, sender_id, sender_nickname, preview, message_type, timestamp } = msg;
+  
+  // 如果当前正在查看这个会话，直接加载新消息并标记已读（不增加未读数）
+  if (state.currentChat && 
+      state.currentChat.type === source_type && 
+      state.currentChat.id === source_id) {
+    // 只更新最后消息预览，不增加未读数
+    updateConversationUnread(source_type, source_id, 0, preview, timestamp);
+    loadMessages();
+    wsSendMarkRead(source_type, source_id);
+  } else {
+    // 不在当前会话，增加未读数
+    updateConversationUnread(source_type, source_id, '+1', preview, timestamp);
+    
+    // 重新计算总未读数（从 state.conversations 计算，避免重复）
+    recalculateTotalUnread();
+    
+    // 显示通知
+    const title = source_type === 'friend' ? sender_nickname : `群消息`;
+    showToast(`${title}: ${preview}`, 'info');
+    
+    // 浏览器通知（如果允许）
+    if (Notification.permission === 'granted') {
+      new Notification(title, { body: preview, tag: message_uuid });
+    }
+  }
+}
+
+// 处理消息撤回通知
+function handleWsMessageRecalled(msg) {
+  const { source_type, source_id, message_uuid, recalled_by } = msg;
+  
+  // 如果当前正在查看这个会话，重新加载消息
+  if (state.currentChat && 
+      state.currentChat.type === source_type && 
+      state.currentChat.id === source_id) {
+    loadMessages();
+  }
+  
+  showToast('有消息被撤回', 'info');
+}
+
+// 处理已读同步通知
+function handleWsReadSync(msg) {
+  const { source_type, source_id, reader_id, read_at } = msg;
+  
+  // 可以在这里更新 UI 显示对方已读状态
+  console.log(`📖 ${reader_id} 已读 ${source_type}/${source_id}`);
+}
+
+// 处理系统通知
+function handleWsSystemNotification(msg) {
+  const { notification_type, data } = msg;
+  
+  switch (notification_type) {
+    case 'friend_request':
+      showToast(`${data.from_nickname || '用户'} 请求添加好友`, 'info');
+      loadPendingRequests();
+      break;
+      
+    case 'friend_request_approved':
+      showToast('好友请求已通过', 'success');
+      loadFriends();
+      break;
+      
+    case 'friend_request_rejected':
+      showToast('好友请求被拒绝', 'warning');
+      break;
+      
+    case 'group_invite':
+      showToast(`收到群聊邀请`, 'info');
+      break;
+      
+    case 'group_join_request':
+      showToast('有新的入群申请', 'info');
+      break;
+      
+    case 'group_join_approved':
+      showToast('入群申请已通过', 'success');
+      loadMyGroups();
+      break;
+      
+    case 'group_removed':
+      showToast('你已被移出群聊', 'warning');
+      loadMyGroups();
+      break;
+      
+    case 'group_disbanded':
+      showToast('群聊已解散', 'warning');
+      loadMyGroups();
+      break;
+      
+    case 'group_notice_updated':
+      showToast('群公告已更新', 'info');
+      break;
+      
+    default:
+      console.log('📢 系统通知:', notification_type, data);
+  }
+}
+
+// 发送标记已读
+function wsSendMarkRead(targetType, targetId) {
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  
+  state.ws.send(JSON.stringify({
+    type: 'mark_read',
+    target_type: targetType,
+    target_id: targetId
+  }));
+  
+  // 更新本地未读数
+  updateConversationUnread(targetType, targetId, 0);
+  
+  // 更新总未读数
+  recalculateTotalUnread();
+}
+
+// 发送心跳
+function wsSendPing() {
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  
+  state.ws.send(JSON.stringify({ type: 'ping' }));
+}
+
+// 更新 WebSocket 连接状态显示
+function updateWsStatus(connected) {
+  const indicator = document.getElementById('wsStatusIndicator');
+  const text = document.getElementById('wsStatusText');
+  
+  if (indicator) {
+    indicator.className = `ws-status-indicator ${connected ? 'connected' : 'disconnected'}`;
+  }
+  
+  if (text) {
+    text.textContent = connected ? '已连接' : '未连接';
+  }
+}
+
+// 更新未读角标
+function updateUnreadBadge(count) {
+  const badge = document.getElementById('unreadBadge');
+  if (badge) {
+    if (count > 0) {
+      badge.textContent = count > 99 ? '99+' : count;
+      badge.style.display = 'flex';
+    } else {
+      badge.style.display = 'none';
+    }
+  }
+}
+
+// 更新会话的未读数
+function updateConversationUnread(type, id, count, lastMessage, lastTime) {
+  const chatId = `${type}-${id}`;
+  
+  // 1. 更新 state.conversations 中的未读数（确保重新渲染时保留状态）
+  const convIndex = state.conversations.findIndex(c => c.type === type && c.id === id);
+  if (convIndex !== -1) {
+    if (count === '+1') {
+      const current = state.conversations[convIndex].unreadCount || 0;
+      count = current + 1;
+    }
+    state.conversations[convIndex].unreadCount = count;
+    
+    if (lastMessage) {
+      state.conversations[convIndex].lastMessage = lastMessage;
+    }
+    if (lastTime) {
+      state.conversations[convIndex].time = lastTime;
+    }
+    
+    // 如果有新消息，将该会话移动到顶部
+    if (count > 0 || lastMessage) {
+      const conv = state.conversations.splice(convIndex, 1)[0];
+      state.conversations.unshift(conv);
+    }
+  }
+  
+  // 2. 更新 DOM 元素
+  const item = document.querySelector(`.conversation-item[data-chat-id="${chatId}"]`);
+  
+  if (item) {
+    const badge = item.querySelector('.unread-badge');
+    if (badge) {
+      if (count > 0) {
+        badge.textContent = count > 99 ? '99+' : count;
+        badge.style.display = 'flex';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+    
+    // 更新最后消息预览
+    if (lastMessage) {
+      const preview = item.querySelector('.conversation-preview');
+      if (preview) {
+        preview.textContent = lastMessage;
+      }
+    }
+    
+    // 更新时间
+    if (lastTime) {
+      const time = item.querySelector('.conversation-time');
+      if (time) {
+        time.textContent = formatTime(lastTime);
+      }
+    }
+    
+    // 移动到列表顶部
+    const list = item.parentElement;
+    if (list && list.firstChild !== item) {
+      list.insertBefore(item, list.firstChild);
+    }
+  }
+}
+
+// 重新计算总未读数（从 state.conversations 计算，更可靠）
+function recalculateTotalUnread() {
+  let total = 0;
+  state.conversations.forEach(c => {
+    total += (c.unreadCount || 0);
+  });
+  updateUnreadBadge(total);
+}
+
+// 切换 WebSocket 连接（点击状态指示器）
+function toggleWsConnection() {
+  if (state.wsConnected) {
+    disconnectWebSocket();
+    showToast('已断开实时消息连接', 'info');
+  } else {
+    if (!state.accessToken) {
+      showToast('请先登录', 'warning');
+      return;
+    }
+    connectWebSocket();
+    showToast('正在连接实时消息...', 'info');
+  }
+}
+
+// ==========================================
 // 认证功能
 // ==========================================
 
-// 检查登录状态
+// 检查登录状态（同步版本，仅检查不刷新）
 function checkAuth() {
+  if (!state.accessToken) {
+    openModal('authModal');
+    return false;
+  }
+  
+  const claims = decodeJwt(state.accessToken);
+  if (!claims || claims.exp * 1000 < Date.now()) {
+    // Token 过期
+    return false;
+  }
+  
+  return true;
+}
+
+// 确保 Token 有效（异步版本，会自动刷新）
+async function ensureAuth() {
   if (!state.accessToken) {
     openModal('authModal');
     return false;
@@ -172,11 +664,12 @@ function checkAuth() {
   if (!claims || claims.exp * 1000 < Date.now()) {
     // Token 过期，尝试刷新
     if (state.refreshToken) {
-      refreshTokenRequest();
+      const refreshed = await refreshTokenRequest();
+      return refreshed;
     } else {
       openModal('authModal');
-    }
     return false;
+    }
   }
   
   return true;
@@ -216,7 +709,10 @@ async function handleLogin(e) {
     
     closeModal('authModal');
     showToast('登录成功', 'success');
-    initApp();
+    await initApp();
+    
+    // 连接 WebSocket
+    await connectWebSocket();
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -248,6 +744,7 @@ async function handleRegister(e) {
 // 刷新 Token
 async function refreshTokenRequest() {
   try {
+    console.log('🔄 正在刷新 Token...');
     const result = await api('/api/auth/refresh', {
       method: 'POST',
       body: { refresh_token: state.refreshToken },
@@ -256,18 +753,31 @@ async function refreshTokenRequest() {
     
     state.accessToken = result.access_token;
     localStorage.setItem('accessToken', result.access_token);
-  } catch {
+    console.log('✅ Token 刷新成功');
+    
+    // 刷新成功后重新连接 WebSocket
+    if (!state.wsConnected) {
+      connectWebSocket();
+    }
+    
+    return true;
+  } catch (e) {
+    console.error('❌ Token 刷新失败:', e);
     // 刷新失败，需要重新登录
     state.accessToken = '';
     state.refreshToken = '';
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
     openModal('authModal');
+    return false;
   }
 }
 
 // 登出
 async function logout() {
+  // 断开 WebSocket
+  disconnectWebSocket();
+  
   try {
     await api('/api/auth/logout', { method: 'POST' });
   } catch {}
@@ -275,6 +785,7 @@ async function logout() {
   state.accessToken = '';
   state.refreshToken = '';
   state.currentUser = null;
+  state.unreadSummary = null;
   localStorage.removeItem('accessToken');
   localStorage.removeItem('refreshToken');
   localStorage.removeItem('currentUser');
@@ -1012,31 +1523,59 @@ async function joinByInviteCode(e) {
 
 // 加载会话列表
 async function loadConversations() {
+  // 保存旧的未读计数（避免刷新时丢失）
+  const oldUnreads = {};
+  state.conversations.forEach(c => {
+    if (c.unreadCount > 0) {
+      oldUnreads[`${c.type}-${c.id}`] = {
+        unreadCount: c.unreadCount,
+        lastMessage: c.lastMessage,
+        time: c.time
+      };
+    }
+  });
+  
   // 合并好友和群聊作为会话
   const conversations = [];
   
   // 好友会话
   for (const f of state.friends) {
+    const key = `friend-${f.friend_id}`;
+    const old = oldUnreads[key] || {};
     conversations.push({
       type: 'friend',
       id: f.friend_id,
       name: f.friend_nickname || f.friend_id,
-      lastMessage: '',
-      time: f.add_time
+      avatarUrl: f.friend_avatar_url,
+      lastMessage: old.lastMessage || '',
+      time: old.time || f.add_time,
+      unreadCount: old.unreadCount || 0
     });
   }
   
   // 群聊会话
   for (const g of state.groups) {
+    const key = `group-${g.group_id}`;
+    const old = oldUnreads[key] || {};
     conversations.push({
       type: 'group',
       id: g.group_id,
       name: g.group_name,
-      lastMessage: '',
-      time: g.created_at,
-      memberCount: g.member_count
+      avatarUrl: g.group_avatar_url,
+      lastMessage: old.lastMessage || '',
+      time: old.time || g.created_at,
+      memberCount: g.member_count,
+      unreadCount: old.unreadCount || 0
     });
   }
+  
+  // 按未读数和时间排序
+  conversations.sort((a, b) => {
+    if ((b.unreadCount || 0) !== (a.unreadCount || 0)) {
+      return (b.unreadCount || 0) - (a.unreadCount || 0);
+    }
+    return new Date(b.time || 0) - new Date(a.time || 0);
+  });
   
   state.conversations = conversations;
   renderConversations();
@@ -1057,17 +1596,31 @@ function renderConversations() {
   }
   
   container.innerHTML = state.conversations.map(c => {
+    const chatId = `${c.type}-${c.id}`;
     const isActive = state.currentChat?.type === c.type && state.currentChat?.id === c.id;
+    const defaultIcon = c.type === 'group' ? '👥' : '👤';
+    const avatarHtml = c.avatarUrl 
+      ? `<img src="${c.avatarUrl}" alt="头像" class="avatar-img" onerror="this.parentElement.innerHTML='${defaultIcon}'">`
+      : defaultIcon;
+    
+    // 获取该会话的未读数（从缓存或状态中获取）
+    const unreadCount = c.unreadCount || 0;
+    const unreadBadgeHtml = unreadCount > 0 
+      ? `<div class="unread-badge" style="display: flex;">${unreadCount > 99 ? '99+' : unreadCount}</div>`
+      : `<div class="unread-badge" style="display: none;">0</div>`;
+    
     return `
       <div class="conversation-item ${isActive ? 'active' : ''}" 
+           data-chat-id="${chatId}"
            onclick="openChat('${c.type}', '${c.id}', '${c.name}')">
-        <div class="item-avatar">${c.type === 'group' ? '👥' : '👤'}</div>
+        <div class="item-avatar">${avatarHtml}</div>
         <div class="item-info">
           <div class="item-name">${c.name}</div>
-          <div class="item-preview">${c.lastMessage || (c.type === 'group' ? `${c.memberCount || 0}人` : '')}</div>
+          <div class="item-preview conversation-preview">${c.lastMessage || (c.type === 'group' ? `${c.memberCount || 0}人` : '')}</div>
         </div>
         <div class="item-meta">
-          <div class="item-time">${formatTime(c.time)}</div>
+          <div class="item-time conversation-time">${formatTime(c.time)}</div>
+          ${unreadBadgeHtml}
         </div>
       </div>
     `;
@@ -1084,7 +1637,15 @@ async function openChat(type, id, name) {
   
   // 更新头部
   document.getElementById('chatName').textContent = name;
-  document.getElementById('chatAvatar').innerHTML = type === 'group' ? '👥' : '👤';
+  
+  // 设置头像（从会话列表中获取头像URL）
+  const conversation = state.conversations.find(c => c.type === type && c.id === id);
+  const avatarUrl = conversation?.avatarUrl;
+  if (avatarUrl) {
+    document.getElementById('chatAvatar').innerHTML = `<img src="${avatarUrl}" alt="头像" class="avatar-img" onerror="this.parentElement.innerHTML='${type === 'group' ? '👥' : '👤'}'">`;
+  } else {
+    document.getElementById('chatAvatar').innerHTML = type === 'group' ? '👥' : '👤';
+  }
   
   // 群聊特有按钮
   document.getElementById('btnGroupNotice').style.display = type === 'group' ? 'inline-flex' : 'none';
@@ -1098,7 +1659,10 @@ async function openChat(type, id, name) {
   }
   
   // 加载消息
-  loadMessages();
+  await loadMessages();
+  
+  // 标记消息已读（清除未读计数）
+  wsSendMarkRead(type, id);
   
   // 更新会话列表高亮
   renderConversations();
@@ -1113,33 +1677,94 @@ function closeChat() {
   renderConversations();
 }
 
-// 加载消息
+// 加载消息（使用时间戳分页优化）
 async function loadMessages() {
   if (!state.currentChat) return;
   
   const { type, id } = state.currentChat;
+  const chatKey = `${type}-${id}`;
   const container = document.getElementById('messageList');
   
   try {
-    let messages;
+    let result;
     
     if (type === 'friend') {
-      const result = await api(`/api/messages?friend_id=${encodeURIComponent(id)}&limit=50`);
-      messages = result.messages || [];
+      result = await api(`/api/messages?friend_id=${encodeURIComponent(id)}&limit=50`);
+      state.messages[chatKey] = result.messages || [];
+      state.hasMore = state.hasMore || {};
+      state.hasMore[chatKey] = result.has_more || false;
     } else {
-      const result = await api(`/api/group-messages?group_id=${encodeURIComponent(id)}&limit=50`);
-      messages = result.data?.messages || [];
+      result = await api(`/api/group-messages?group_id=${encodeURIComponent(id)}&limit=50`);
+      state.messages[chatKey] = result.data?.messages || [];
+      state.hasMore = state.hasMore || {};
+      state.hasMore[chatKey] = result.data?.has_more || false;
     }
     
-    state.messages[`${type}-${id}`] = messages;
-    renderMessages(messages);
+    renderMessages(state.messages[chatKey]);
   } catch (err) {
     console.error('加载消息失败:', err);
     container.innerHTML = '<div class="empty-state"><p>加载消息失败</p></div>';
   }
 }
 
-function renderMessages(messages) {
+// 加载更多历史消息（使用时间戳分页）
+async function loadMoreMessages() {
+  if (!state.currentChat) return;
+  
+  const { type, id } = state.currentChat;
+  const chatKey = `${type}-${id}`;
+  const messages = state.messages[chatKey] || [];
+  
+  // 检查是否还有更多消息
+  if (!state.hasMore?.[chatKey] || messages.length === 0) {
+    showToast('没有更多历史消息了', 'info');
+    return;
+  }
+  
+  // 获取最老消息的时间戳（ISO 8601 格式）
+  const oldestMessage = messages[messages.length - 1];
+  const beforeTime = oldestMessage?.send_time;
+  
+  if (!beforeTime) return;
+  
+  try {
+    let result;
+    
+    if (type === 'friend') {
+      result = await api(`/api/messages?friend_id=${encodeURIComponent(id)}&before_time=${encodeURIComponent(beforeTime)}&limit=50`);
+      const moreMessages = result.messages || [];
+      state.messages[chatKey] = [...messages, ...moreMessages];
+      state.hasMore[chatKey] = result.has_more || false;
+    } else {
+      result = await api(`/api/group-messages?group_id=${encodeURIComponent(id)}&before_time=${encodeURIComponent(beforeTime)}&limit=50`);
+      const moreMessages = result.data?.messages || [];
+      state.messages[chatKey] = [...messages, ...moreMessages];
+      state.hasMore[chatKey] = result.data?.has_more || false;
+    }
+    
+    // 保存当前滚动位置
+    const msgContainer = document.getElementById('messageContainer');
+    const scrollHeightBefore = msgContainer.scrollHeight;
+    const scrollTopBefore = msgContainer.scrollTop;
+    
+    // 重新渲染消息（不自动滚动到底部）
+    renderMessages(state.messages[chatKey], { scrollToEnd: false });
+    
+    // 恢复滚动位置（加载的历史消息在顶部，保持用户看到的内容不变）
+    const scrollHeightAfter = msgContainer.scrollHeight;
+    msgContainer.scrollTop = scrollHeightAfter - scrollHeightBefore + scrollTopBefore;
+    
+    if (!state.hasMore[chatKey]) {
+      showToast('已加载全部历史消息', 'info');
+    }
+  } catch (err) {
+    console.error('加载更多消息失败:', err);
+    showToast('加载更多消息失败', 'error');
+  }
+}
+
+function renderMessages(messages, options = {}) {
+  const { scrollToEnd = true } = options;  // 默认滚动到底部，加载更多时传 false
   const container = document.getElementById('messageList');
   const claims = decodeJwt(state.accessToken);
   const myId = claims?.sub;
@@ -1152,22 +1777,36 @@ function renderMessages(messages) {
   // 翻转消息顺序：后端返回最新在前，前端需要最新在后（底部）
   const sortedMessages = [...messages].reverse();
   
-  container.innerHTML = sortedMessages.map(msg => {
+  // 检查是否有更多历史消息（"加载更多"按钮）
+  const chatKey = state.currentChat ? `${state.currentChat.type}-${state.currentChat.id}` : '';
+  const hasMore = state.hasMore?.[chatKey];
+  const loadMoreBtn = hasMore 
+    ? `<div class="load-more-container"><button class="load-more-btn" onclick="loadMoreMessages()">⬆️ 加载更多历史消息</button></div>` 
+    : '';
+  
+  container.innerHTML = loadMoreBtn + sortedMessages.map(msg => {
     const isSelf = msg.sender_id === myId;
     const hasFile = msg.file_uuid && msg.file_uuid !== 'null';
     
     // 获取头像
     let avatarHtml = '👤';
     if (isSelf) {
-      // 自己的头像
-      if (state.userProfile?.avatar_url) {
-        avatarHtml = `<img src="${state.userProfile.avatar_url}" alt="头像" class="avatar-img" onerror="this.parentElement.innerHTML='👤'">`;
+      // 自己的头像（从 state.currentUser 获取）
+      if (state.currentUser?.user_avatar_url) {
+        avatarHtml = `<img src="${state.currentUser.user_avatar_url}" alt="头像" class="avatar-img" onerror="this.parentElement.innerHTML='👤'">`;
       }
     } else if (state.currentChat?.type === 'friend') {
       // 好友头像：从好友列表查找
       const friend = state.friends.find(f => f.friend_id === msg.sender_id);
       if (friend?.friend_avatar_url) {
         avatarHtml = `<img src="${friend.friend_avatar_url}" alt="头像" class="avatar-img" onerror="this.parentElement.innerHTML='👤'">`;
+      }
+    } else if (state.currentChat?.type === 'group') {
+      // 群成员头像：从群成员列表查找
+      const members = state.groupMembers[state.currentChat.id] || [];
+      const member = members.find(m => m.user_id === msg.sender_id);
+      if (member?.user_avatar_url) {
+        avatarHtml = `<img src="${member.user_avatar_url}" alt="头像" class="avatar-img" onerror="this.parentElement.innerHTML='👤'">`;
       }
     }
     
@@ -1176,9 +1815,10 @@ function renderMessages(messages) {
     // 文件消息
     if (hasFile) {
       if (msg.message_type === 'image') {
-        contentHtml += `<img class="message-image" src="" alt="图片" onclick="previewFile('${msg.file_uuid}')" data-uuid="${msg.file_uuid}">`;
+        // 不设置 src，避免触发无效请求，后续通过 JS 加载
+        contentHtml += `<img class="message-image" alt="加载中..." onclick="previewFile('${msg.file_uuid}')" data-uuid="${msg.file_uuid}" data-loaded="false">`;
       } else if (msg.message_type === 'video') {
-        contentHtml += `<video class="message-video" controls data-uuid="${msg.file_uuid}"></video>`;
+        contentHtml += `<video class="message-video" controls data-uuid="${msg.file_uuid}" data-loaded="false" preload="none"></video>`;
       } else {
         contentHtml += `
           <div class="message-file" onclick="downloadFile('${msg.file_uuid}')">
@@ -1203,12 +1843,37 @@ function renderMessages(messages) {
     `;
   }).join('');
   
-  // 滚动到底部
-  const msgContainer = document.getElementById('messageContainer');
-  msgContainer.scrollTop = msgContainer.scrollHeight;
+  // 只有首次加载时滚动到底部，加载更多历史消息时不滚动
+  if (scrollToEnd) {
+    scrollToBottom();
+  }
   
   // 加载文件预览
   loadFilePreviewsInMessages();
+}
+
+// 滚动消息列表到底部（多次尝试确保滚动成功）
+function scrollToBottom() {
+  const msgContainer = document.getElementById('messageContainer');
+  if (!msgContainer) return;
+  
+  // 立即滚动一次
+  msgContainer.scrollTop = msgContainer.scrollHeight;
+  
+  // requestAnimationFrame 后再滚动一次
+  requestAnimationFrame(() => {
+    msgContainer.scrollTop = msgContainer.scrollHeight;
+  });
+  
+  // 延迟 50ms 后再滚动一次（确保 DOM 完全渲染）
+  setTimeout(() => {
+    msgContainer.scrollTop = msgContainer.scrollHeight;
+  }, 50);
+  
+  // 延迟 200ms 后再滚动一次（确保图片等资源加载后）
+  setTimeout(() => {
+    msgContainer.scrollTop = msgContainer.scrollHeight;
+  }, 200);
 }
 
 function escapeHtml(text) {
@@ -1219,34 +1884,125 @@ function escapeHtml(text) {
 
 // 加载消息中的文件预览
 async function loadFilePreviewsInMessages() {
-  const images = document.querySelectorAll('.message-image[data-uuid]');
-  const videos = document.querySelectorAll('.message-video[data-uuid]');
+  // 确保 Token 有效（异步等待刷新）
+  if (!await ensureAuth()) return;
   
-  for (const img of images) {
+  // 获取所有未加载的图片和视频
+  const images = document.querySelectorAll('.message-image[data-uuid][data-loaded="false"]');
+  const videos = document.querySelectorAll('.message-video[data-uuid][data-loaded="false"]');
+  
+  console.log(`📷 加载文件预览: ${images.length} 张图片, ${videos.length} 个视频`);
+  
+  // 并行加载所有图片（带重试）
+  const imagePromises = Array.from(images).map(async (img) => {
     const uuid = img.dataset.uuid;
+    if (!uuid) return;
+    
+    for (let retry = 0; retry < 3; retry++) {
     try {
       const url = await getFilePresignedUrl(uuid);
-      if (url) img.src = url;
-    } catch {}
-  }
+        if (url) {
+          img.src = url;
+          img.dataset.loaded = 'true';
+          img.alt = '图片';
+          console.log(`✅ 图片加载成功: ${uuid}`);
+          return;
+        }
+      } catch (e) {
+        console.warn(`图片加载重试 ${retry + 1}/3 (${uuid}):`, e.message);
+        if (retry === 2) {
+          img.alt = '图片加载失败，点击重试';
+          img.onclick = () => retryLoadFile(img, uuid, 'image');
+        }
+        await new Promise(r => setTimeout(r, 1000 * (retry + 1))); // 退避重试
+      }
+    }
+  });
   
-  for (const video of videos) {
+  // 并行加载所有视频（带重试）
+  const videoPromises = Array.from(videos).map(async (video) => {
     const uuid = video.dataset.uuid;
+    if (!uuid) return;
+    
+    for (let retry = 0; retry < 3; retry++) {
     try {
       const url = await getFilePresignedUrl(uuid);
-      if (url) video.src = url;
-    } catch {}
+        if (url) {
+          video.src = url;
+          video.dataset.loaded = 'true';
+          console.log(`✅ 视频加载成功: ${uuid}`);
+          return;
+        }
+      } catch (e) {
+        console.warn(`视频加载重试 ${retry + 1}/3 (${uuid}):`, e.message);
+        if (retry === 2) {
+          // 视频加载失败时显示提示
+          const parent = video.parentElement;
+          if (parent) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'video-error';
+            errorDiv.textContent = '视频加载失败，点击重试';
+            errorDiv.onclick = () => {
+              errorDiv.remove();
+              retryLoadFile(video, uuid, 'video');
+            };
+            parent.appendChild(errorDiv);
+          }
+        }
+        await new Promise(r => setTimeout(r, 1000 * (retry + 1)));
+      }
+    }
+  });
+  
+  // 等待所有加载完成
+  await Promise.allSettled([...imagePromises, ...videoPromises]);
+}
+
+// 重试加载文件
+async function retryLoadFile(element, uuid, type) {
+  try {
+    const url = await getFilePresignedUrl(uuid);
+    if (url) {
+      element.src = url;
+      element.dataset.loaded = 'true';
+      if (type === 'image') {
+        element.alt = '图片';
+        element.onclick = () => previewFile(uuid);
+      }
+      showToast('文件加载成功', 'success');
+    }
+  } catch (e) {
+    showToast('文件加载失败: ' + e.message, 'error');
   }
 }
 
 async function getFilePresignedUrl(uuid) {
-  // 根据当前聊天类型选择 API
-  const endpoint = state.currentChat?.type === 'group'
-    ? `/api/storage/file/${uuid}/presigned_url`
-    : `/api/storage/friends_file/${uuid}/presigned_url`;
+  // 确保 Token 有效
+  if (!await ensureAuth()) {
+    throw new Error('认证失败');
+  }
   
-  const result = await api(endpoint, { method: 'POST', body: { operation: 'download' } });
+  // 优先尝试通用文件 API（后端会自动判断 bucket 类型）
+  // 通用 API 支持：个人文件、群文件、好友文件
+  try {
+    const result = await api(`/api/storage/file/${uuid}/presigned_url`, { 
+      method: 'POST', 
+      body: { operation: 'download' } 
+    });
+    return result.presigned_url;
+  } catch (e) {
+    // 如果通用 API 失败（可能是权限问题），尝试好友专用 API
+    // 好友专用 API 会验证好友关系
+    if (state.currentChat?.type === 'friend') {
+      console.log(`通用 API 失败，尝试好友文件 API: ${uuid}`);
+      const result = await api(`/api/storage/friends_file/${uuid}/presigned_url`, { 
+        method: 'POST', 
+        body: { operation: 'download' } 
+      });
   return result.presigned_url;
+    }
+    throw e;
+  }
 }
 
 // 发送消息
@@ -1400,28 +2156,67 @@ async function renderInfoPanel() {
   } else {
     title.textContent = '群聊信息';
     
+    // 获取群详情
+    const groupInfo = await api(`/api/groups/${id}`);
+    const group = groupInfo.data || {};
     const members = await loadGroupMembers(id);
     const claims = decodeJwt(state.accessToken);
     const myMember = members.find(m => m.user_id === claims?.sub);
     const isAdmin = myMember?.role === 'owner' || myMember?.role === 'admin';
+    const isOwner = myMember?.role === 'owner';
+    
+    // 群头像
+    const groupAvatarHtml = group.group_avatar_url 
+      ? `<img src="${group.group_avatar_url}" alt="群头像" class="avatar-img" style="width:80px;height:80px;border-radius:12px;" onerror="this.parentElement.innerHTML='👥'">`
+      : '👥';
     
     content.innerHTML = `
       <div class="info-section" style="text-align: center;">
-        <div class="info-avatar">👥</div>
-        <div class="info-name">${name}</div>
+        <div class="info-avatar" style="font-size:50px;cursor:${isAdmin ? 'pointer' : 'default'}" ${isAdmin ? `onclick="showUploadGroupAvatarModal('${id}')" title="点击修改群头像"` : ''}>${groupAvatarHtml}</div>
+        <div class="info-name">${group.group_name || name}</div>
         <div class="info-id">${members.length}人</div>
       </div>
       
       <div class="info-section">
+        <h4>我的群昵称</h4>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="text" id="myGroupNickname" class="form-input" 
+                 value="${myMember?.group_nickname || ''}" 
+                 placeholder="设置群内昵称（不填则显示用户昵称）"
+                 style="flex:1;">
+          <button class="btn-primary" onclick="updateMyGroupNickname('${id}')">保存</button>
+        </div>
+      </div>
+      
+      ${isAdmin ? `
+        <div class="info-section">
+          <h4>群设置</h4>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+            <input type="text" id="editGroupName" class="form-input" 
+                   value="${group.group_name || ''}" 
+                   placeholder="群名称"
+                   style="flex:1;">
+            <button class="btn-primary" onclick="updateGroupName('${id}')">修改</button>
+          </div>
+          <button class="btn-secondary btn-block" onclick="showUploadGroupAvatarModal('${id}')">上传群头像</button>
+        </div>
+      ` : ''}
+      
+      <div class="info-section">
         <h4>群成员</h4>
         <div class="member-list">
-          ${members.map(m => `
-            <div class="member-item">
-              <div class="member-avatar">👤</div>
-              <div class="member-name">${m.user_id}</div>
-              <span class="member-role ${m.role}">${m.role === 'owner' ? '群主' : m.role === 'admin' ? '管理员' : ''}</span>
-            </div>
-          `).join('')}
+          ${members.map(m => {
+            const memberAvatarHtml = m.user_avatar_url 
+              ? `<img src="${m.user_avatar_url}" alt="头像" class="avatar-img" onerror="this.parentElement.innerHTML='👤'">`
+              : '👤';
+            return `
+              <div class="member-item">
+                <div class="member-avatar">${memberAvatarHtml}</div>
+                <div class="member-name">${m.group_nickname || m.user_nickname || m.user_id}</div>
+                <span class="member-role ${m.role}">${m.role === 'owner' ? '群主' : m.role === 'admin' ? '管理员' : ''}</span>
+              </div>
+            `;
+          }).join('')}
         </div>
       </div>
       
@@ -1449,6 +2244,137 @@ async function leaveGroup(groupId) {
     closeChat();
     loadMyGroups();
     loadConversations();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// 修改群名称
+async function updateGroupName(groupId) {
+  const nameInput = document.getElementById('editGroupName');
+  const newName = nameInput?.value?.trim();
+  
+  if (!newName) {
+    showToast('请输入群名称', 'error');
+    return;
+  }
+  
+  try {
+    await api(`/api/groups/${groupId}`, {
+      method: 'PUT',
+      body: { group_name: newName }
+    });
+    showToast('群名称已更新', 'success');
+    
+    // 更新本地状态
+    if (state.currentChat?.id === groupId) {
+      state.currentChat.name = newName;
+      document.getElementById('chatName').textContent = newName;
+    }
+    
+    // 刷新群列表和会话列表
+    await loadMyGroups();
+    loadConversations();
+    renderInfoPanel();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// 修改我的群内昵称
+async function updateMyGroupNickname(groupId) {
+  const nicknameInput = document.getElementById('myGroupNickname');
+  const nickname = nicknameInput?.value?.trim() || null;
+  
+  try {
+    await api(`/api/groups/${groupId}/nickname`, {
+      method: 'PUT',
+      body: { nickname }
+    });
+    showToast(nickname ? '群昵称已更新' : '群昵称已清除', 'success');
+    
+    // 刷新群成员列表
+    await loadGroupMembers(groupId);
+    renderInfoPanel();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// 显示上传群头像弹窗
+function showUploadGroupAvatarModal(groupId) {
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.id = 'uploadGroupAvatarModal';
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width: 400px;">
+      <div class="modal-header">
+        <h3>上传群头像</h3>
+        <button class="modal-close" onclick="closeModal('uploadGroupAvatarModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div style="text-align: center; margin-bottom: 16px;">
+          <div id="groupAvatarPreview" style="width: 120px; height: 120px; border-radius: 12px; background: var(--bg-hover); margin: 0 auto; display: flex; align-items: center; justify-content: center; font-size: 48px; overflow: hidden;">
+            👥
+          </div>
+        </div>
+        <input type="file" id="groupAvatarFile" accept="image/*" style="display: none;" onchange="previewGroupAvatar(this)">
+        <button class="btn-secondary btn-block" onclick="document.getElementById('groupAvatarFile').click()">选择图片</button>
+        <p style="font-size: 12px; color: var(--text-secondary); margin-top: 8px; text-align: center;">支持 jpg、png、gif、webp，最大 10MB</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeModal('uploadGroupAvatarModal')">取消</button>
+        <button class="btn-primary" onclick="uploadGroupAvatar('${groupId}')">上传</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.style.display = 'flex';
+}
+
+// 预览群头像
+function previewGroupAvatar(input) {
+  const file = input.files[0];
+  if (!file) return;
+  
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    document.getElementById('groupAvatarPreview').innerHTML = `<img src="${e.target.result}" style="width:100%;height:100%;object-fit:cover;">`;
+  };
+  reader.readAsDataURL(file);
+}
+
+// 上传群头像
+async function uploadGroupAvatar(groupId) {
+  const fileInput = document.getElementById('groupAvatarFile');
+  const file = fileInput?.files[0];
+  
+  if (!file) {
+    showToast('请选择图片', 'error');
+    return;
+  }
+  
+  try {
+    const formData = new FormData();
+    formData.append('avatar', file);
+    
+    const result = await api(`/api/groups/${groupId}/avatar`, {
+      method: 'POST',
+      formData
+    });
+    
+    showToast('群头像已更新', 'success');
+    closeModal('uploadGroupAvatarModal');
+    
+    // 更新聊天头部头像
+    if (result.data?.avatar_url) {
+      document.getElementById('chatAvatar').innerHTML = `<img src="${result.data.avatar_url}" alt="头像" class="avatar-img" onerror="this.parentElement.innerHTML='👥'">`;
+    }
+    
+    // 刷新群列表和会话列表
+    await loadMyGroups();
+    loadConversations();
+    renderInfoPanel();
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -1684,14 +2610,20 @@ function handleSearch(query) {
     return;
   }
   
-  container.innerHTML = conversations.map(c => `
-    <div class="conversation-item" onclick="openChat('${c.type}', '${c.id}', '${c.name}')">
-      <div class="item-avatar">${c.type === 'group' ? '👥' : '👤'}</div>
-      <div class="item-info">
-        <div class="item-name">${c.name}</div>
+  container.innerHTML = conversations.map(c => {
+    const defaultIcon = c.type === 'group' ? '👥' : '👤';
+    const avatarHtml = c.avatarUrl 
+      ? `<img src="${c.avatarUrl}" alt="头像" class="avatar-img" onerror="this.parentElement.innerHTML='${defaultIcon}'">`
+      : defaultIcon;
+    return `
+      <div class="conversation-item" onclick="openChat('${c.type}', '${c.id}', '${c.name}')">
+        <div class="item-avatar">${avatarHtml}</div>
+        <div class="item-info">
+          <div class="item-name">${c.name}</div>
+        </div>
       </div>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
 // ==========================================
@@ -1699,7 +2631,8 @@ function handleSearch(query) {
 // ==========================================
 
 async function initApp() {
-  if (!checkAuth()) return;
+  // 确保 Token 有效（会自动刷新过期的 Token）
+  if (!await ensureAuth()) return;
   
   // 显示快速操作
   document.getElementById('quickActions').style.display = 'flex';
@@ -1717,6 +2650,14 @@ async function initApp() {
   await loadFriends();
   await loadMyGroups();
   loadConversations();
+  
+  // 连接 WebSocket
+  await connectWebSocket();
+  
+  // 请求浏览器通知权限
+  if (Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
 }
 
 // 页面加载完成

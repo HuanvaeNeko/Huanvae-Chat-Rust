@@ -127,6 +127,32 @@
 
 ---
 
+### 消息优化
+
+#### `07_message_optimization.sql`
+**用途**: 消息查询性能优化，包含复合索引、缓存表和归档表
+
+**创建的表**:
+- `group-message-cache` - 群消息热点缓存表（JSONB 快照）
+- `friend-messages-archive` - 好友消息归档表
+- `group-messages-archive` - 群消息归档表
+
+**创建的索引**:
+- `idx-friend-messages-conv-time` - 好友消息会话+时间复合索引
+- `idx-group-messages-group-time` - 群消息群ID+时间复合索引
+- `idx-group-messages-sender-time` - 群消息发送者+时间索引
+
+**创建的函数**:
+- `archive_old_messages(days)` - 归档指定天数前的消息
+- `cleanup_expired_message_cache()` - 清理过期的消息缓存
+
+**设计特点**:
+- **时间戳分页**: 直接使用时间戳比较，避免子查询
+- **JOIN 优化**: 群消息查询一次性获取发送者信息
+- **消息归档**: 30天前的消息自动归档到独立表
+
+---
+
 ## 🚀 执行顺序
 
 PostgreSQL 会按照文件名的字母顺序执行初始化脚本：
@@ -137,6 +163,7 @@ PostgreSQL 会按照文件名的字母顺序执行初始化脚本：
 4. `04_file_system.sql` - 文件系统
 5. `05_indexes.sql` - 补充索引
 6. `06_group_system.sql` - 群聊系统
+7. `07_message_optimization.sql` - 消息优化（索引+缓存+归档）
 
 **重要**: 请保持文件名前缀的数字顺序，否则可能导致外键约束失败。
 
@@ -181,7 +208,8 @@ file-uuid-mapping (UUID映射)
 | 文件系统 | 4 | 10 | 1 |
 | 补充索引 | - | 14 | - |
 | 群聊系统 | 8 | 20+ | 6 |
-| **总计** | **21** | **80+** | **11** |
+| 消息优化 | 3 | 5 | 0 |
+| **总计** | **24** | **85+** | **11** |
 
 ---
 

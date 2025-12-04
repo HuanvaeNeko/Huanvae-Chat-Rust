@@ -102,3 +102,10 @@ impl SuccessResponse {
     }
 }
 
+/// 头像上传响应
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AvatarResponse {
+    pub avatar_url: String,
+    pub message: String,
+}
+

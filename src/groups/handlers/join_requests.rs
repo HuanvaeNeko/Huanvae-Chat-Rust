@@ -44,7 +44,7 @@ pub async fn apply_join(
     .bind(&auth.user_id)
     .fetch_optional(&state.db)
     .await
-    .map_err(|_| AppError::Internal)?;
+    .map_err(|e| AppError::Database(format!("查询待处理申请失败: {}", e)))?;
 
     if existing.is_some() {
         return Err(AppError::BadRequest("您已提交过入群申请，请等待审核".to_string()));
@@ -83,10 +83,7 @@ pub async fn apply_join(
         .bind(expires_at)
         .execute(&state.db)
         .await
-        .map_err(|e| {
-            tracing::error!("创建入群申请失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("创建入群申请失败: {}", e)))?;
 
         Ok(Json(ApiResponse::success(SuccessResponse::new("申请已提交，等待管理员审核"))))
     }
@@ -115,10 +112,7 @@ pub async fn get_pending_requests(
     .bind(group_id)
     .fetch_all(&state.db)
     .await
-    .map_err(|e| {
-        tracing::error!("查询入群申请失败: {}", e);
-        AppError::Internal
-    })?;
+    .map_err(|e| AppError::Database(format!("查询入群申请失败: {}", e)))?;
 
     let group_info = state.group_service.get_group_info(&group_id).await?;
 
@@ -189,7 +183,7 @@ pub async fn approve_request(
     .bind(group_id)
     .fetch_optional(&state.db)
     .await
-    .map_err(|_| AppError::Internal)?
+    .map_err(|e| AppError::Database(format!("查询申请记录失败: {}", e)))?
     .ok_or_else(|| AppError::BadRequest("申请不存在或已处理".to_string()))?;
 
     let (user_id, request_type, inviter_id, invite_code_id) = request;
@@ -208,7 +202,7 @@ pub async fn approve_request(
     .bind(request_id)
     .execute(&state.db)
     .await
-    .map_err(|_| AppError::Internal)?;
+    .map_err(|e| AppError::Database(format!("更新申请状态失败: {}", e)))?;
 
     // 确定入群方式
     let join_method = match request_type.as_str() {
@@ -261,7 +255,7 @@ pub async fn reject_request(
     .bind(group_id)
     .execute(&state.db)
     .await
-    .map_err(|_| AppError::Internal)?;
+    .map_err(|e| AppError::Database(format!("拒绝入群申请失败: {}", e)))?;
 
     if result.rows_affected() == 0 {
         return Err(AppError::BadRequest("申请不存在或已处理".to_string()));
@@ -291,10 +285,7 @@ pub async fn get_invitations(
     .bind(&auth.user_id)
     .fetch_all(&state.db)
     .await
-    .map_err(|e| {
-        tracing::error!("查询邀请列表失败: {}", e);
-        AppError::Internal
-    })?;
+    .map_err(|e| AppError::Database(format!("查询邀请列表失败: {}", e)))?;
 
     let mut result = Vec::new();
     for (id, group_id, inviter_id, message, group_name, created_at, expires_at) in invitations {
@@ -351,7 +342,7 @@ pub async fn accept_invitation(
     .bind(&auth.user_id)
     .fetch_optional(&state.db)
     .await
-    .map_err(|_| AppError::Internal)?
+    .map_err(|e| AppError::Database(format!("查询邀请记录失败: {}", e)))?
     .ok_or_else(|| AppError::BadRequest("邀请不存在或已处理".to_string()))?;
 
     let (group_id, request_type, inviter_id, invite_code_id) = request;
@@ -378,7 +369,7 @@ pub async fn accept_invitation(
         .bind(request_id)
         .execute(&state.db)
         .await
-        .map_err(|_| AppError::Internal)?;
+        .map_err(|e| AppError::Database(format!("更新邀请状态失败: {}", e)))?;
 
         // 确定入群方式
         let join_method = if request_type == "owner_invite" {
@@ -411,7 +402,7 @@ pub async fn accept_invitation(
         .bind(request_id)
         .execute(&state.db)
         .await
-        .map_err(|_| AppError::Internal)?;
+        .map_err(|e| AppError::Database(format!("更新邀请状态失败: {}", e)))?;
 
         Ok(Json(ApiResponse::success(SuccessResponse::new("已同意邀请，等待管理员审核"))))
     }
@@ -432,7 +423,7 @@ pub async fn decline_invitation(
     .bind(&auth.user_id)
     .execute(&state.db)
     .await
-    .map_err(|_| AppError::Internal)?;
+    .map_err(|e| AppError::Database(format!("拒绝邀请失败: {}", e)))?;
 
     if result.rows_affected() == 0 {
         return Err(AppError::BadRequest("邀请不存在或已处理".to_string()));

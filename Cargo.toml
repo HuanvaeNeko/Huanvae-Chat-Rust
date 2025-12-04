@@ -8,14 +8,14 @@ edition = "2024"
 tokio = { version = "1.48.0", features = ["full"] }
 axum = { version = "0.8.7", features = ["macros", "multipart", "ws"] }
 tower = { version = "0.5.2", features = ["util"] }
-tower-http = { version = "0.6.6", features = ["cors", "trace"] }
+tower-http = { version = "0.6.7", features = ["cors", "trace"] }
 
 # JWT + 加密
 jsonwebtoken = { version = "10.2.0", default-features = false, features = ["rust_crypto"] }
 rsa = { version = "0.9.9", features = ["pem"] }
 bcrypt = "0.17.1"
 rand = "0.8.5"
-sha2 = "0.10.8"  # SHA-256 哈希计算
+sha2 = "0.10.9"  # SHA-256 哈希计算
 
 # 数据库
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json"] }
@@ -36,7 +36,6 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 
 # 错误处理
-anyhow = "1.0.100"
 thiserror = "2.0.17"
 
 # 验证
@@ -48,6 +47,5 @@ aws-config = "1.8.11"
 aws-credential-types = "1.2.10"
 
 # WebSocket 和并发
-tokio-tungstenite = "0.28.0"  # WebSocket 实现
 futures-util = "0.3.31"       # 异步流处理工具
 dashmap = "6.1.0"             # 高性能并发 HashMap (ConnectionManager)

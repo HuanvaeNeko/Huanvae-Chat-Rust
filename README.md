@@ -1,36 +1,6 @@
-# HuanVae Chat - 用户认证系统
+# HuanVae Chat - 即时通讯系统
 
-## 安全机制概览
-
-- 认证中间件门控：`need-blacklist-check` + `blacklist-check-expires-at`
-  - 正常请求跳过黑名单查询（高性能）
-  - 安全事件（登出、删除设备）开启 15 分钟窗口，窗口内查询黑名单并拦截
-
-- 按设备拉黑（统一策略）
-  - 缓存表 `user-access-cache` 记录近 15 分钟签发的 Access Token（`jti/user-id/device-id/exp/issued-at`）
-  - 删除设备/登出：按 `device_id` 读取缓存，批量将命中的 `jti` 写入黑名单；缓存为空时对当前请求 `jti` 兜底拉黑
-
-- 时间戳转换
-  - 用 `chrono::DateTime::from_timestamp(exp, 0).map(|dt| dt.naive_utc())` 代替废弃的 `NaiveDateTime::from_timestamp_opt`
-  - 当 `exp` 非法时，回退 `Utc::now().naive_utc()`，确保黑名单过期时间有效
-
-- 端点与覆盖
-  - 认证：`/api/auth/register`、`/api/auth/login`、`/api/auth/refresh`（公开）；`/api/auth/logout`、`/api/auth/devices`、`DELETE /api/auth/devices/{id}`（受保护）
-  - 好友：`/api/friends/requests`、`/requests/approve`、`/requests/reject`、`/remove`（写，受保护）；`/requests/sent`、`/requests/pending`、`/`（读，受保护）
-
-## 终端测试流程
-
-1. 注册两个用户，避免重复：`u1_<timestamp>`、`u2_<timestamp>`
-2. 登录 `u1` 获取 `access_token` 和 `device_id`
-3. 使用 Token 发起好友请求到 `u2`
-4. 删除当前设备（远程登出）
-5. 使用旧 Token 再次发起好友请求（应 401）
-6. 重新登录 `u1` 获取新 Token
-7. 使用新 Token 再次发起好友请求（应 200）
-
-以上流程用于验证“按设备拉黑 + 门控窗口”的即时拦截行为。
-
-基于 Rust + Axum + PostgreSQL + JWT 的完整认证系统，支持多设备登录和智能黑名单管理。
+基于 Rust + Axum + PostgreSQL + MinIO + WebSocket 的完整即时通讯系统，支持好友私聊、群聊、文件传输、实时消息推送。
 
 ## ✨ 功能特性
 
@@ -47,6 +17,23 @@
 - ✅ **好友请求** - 发送、接受、拒绝好友申请
 - ✅ **好友列表** - 查看已有好友、待处理请求
 - ✅ **好友管理** - 删除好友（软删除）
+- ✅ **好友消息** - 私聊消息发送、获取、删除、撤回
+
+### 群聊系统 (Groups)
+- ✅ **群聊管理** - 创建/解散群聊、修改群信息
+- ✅ **成员管理** - 邀请、移除、退出群聊
+- ✅ **角色管理** - 群主、管理员权限
+- ✅ **禁言管理** - 对成员禁言/解除禁言
+- ✅ **邀请码** - 生成、使用、撤销邀请码
+- ✅ **入群申请** - 申请入群、处理申请
+- ✅ **群公告** - 发布、更新、删除群公告
+- ✅ **群消息** - 群聊消息发送、获取、删除、撤回
+
+### 实时通信 (WebSocket)
+- ✅ **实时消息推送** - 好友/群消息实时通知
+- ✅ **未读消息管理** - 未读计数、已读同步
+- ✅ **心跳机制** - 连接保活、断线检测
+- ✅ **已读回执** - 可配置的已读状态通知
 
 ### 个人资料 (Profile)
 - ✅ **信息查询** - 获取完整个人信息（不含密码）
@@ -56,44 +43,87 @@
 
 ### 对象存储 (Storage)
 - ✅ **MinIO 集成** - S3 兼容的对象存储
-- ✅ **头像存储** - 公开访问的用户头像
+- ✅ **头像存储** - 用户头像、群头像
 - ✅ **文件验证** - 类型、大小验证
 - ✅ **UUID映射去重** - 跨用户文件去重，秒传功能
 - ✅ **采样哈希** - 大文件采样哈希计算，避免内存溢出
 - ✅ **预签名URL** - 客户端直连MinIO，支持流式播放
 - ✅ **权限管理** - 基于权限表的文件访问控制
-- ⏳ **群文件存储** - 待实现
+- ✅ **好友文件** - 好友聊天文件存储
+- ✅ **群文件** - 群聊文件存储
+
+### 性能优化 (Performance)
+- ✅ **时间戳分页** - 消息查询使用时间戳分页，性能提升 30-50%
+- ✅ **JOIN 优化** - 群消息一次性获取发送者信息，消除 N+1 问题
+- ✅ **复合索引** - 针对高频查询的数据库索引优化
+- ✅ **消息归档** - 30天前消息自动归档，保持活跃表性能
+- ✅ **消息缓存** - PostgreSQL 缓存热点群消息（可选）
 
 ## 📂 项目结构
 
 ```
 src/
-├── auth/                  # 认证模块
-│   ├── errors.rs          # 错误类型定义
-│   ├── models/            # 数据模型
-│   ├── utils/             # 工具函数（密钥、密码、验证）
-│   ├── services/          # 业务逻辑（Token、黑名单、设备）
-│   ├── middleware/        # 鉴权中间件
-│   └── handlers/          # HTTP 请求处理
-├── friends/               # 好友系统模块
-│   ├── models/            # 请求/响应模型
-│   ├── services/          # 业务逻辑（好友管理）
-│   └── handlers/          # HTTP 请求处理
-├── profile/               # 个人资料模块
-│   ├── models/            # 请求/响应模型
-│   ├── services/          # 业务逻辑（资料管理）
-│   └── handlers/          # HTTP 请求处理
-├── storage/               # 对象存储模块
-│   ├── client.rs          # S3/MinIO 客户端
-│   ├── config.rs          # 配置管理
-│   └── services/          # 业务服务（头像上传）
-├── main.rs                # 应用入口
-└── lib.rs                 # 库导出
+├── auth/                    # 认证模块
+│   ├── models/              # 数据模型
+│   ├── utils/               # 工具函数（密钥、密码、验证）
+│   ├── services/            # 业务逻辑（Token、黑名单、设备）
+│   ├── middleware/          # 鉴权中间件
+│   └── handlers/            # HTTP 请求处理
+├── friends/                 # 好友系统模块
+│   ├── models/              # 请求/响应模型
+│   ├── services/            # 业务逻辑（好友管理）
+│   └── handlers/            # HTTP 请求处理
+├── friends_messages/        # 好友消息模块
+│   ├── models/              # 消息数据模型
+│   ├── services/            # 消息服务（时间戳分页优化）
+│   └── handlers/            # HTTP 请求处理
+├── groups/                  # 群聊系统模块
+│   ├── models/              # 群聊数据模型
+│   ├── services/            # 群聊服务
+│   └── handlers/            # HTTP 请求处理
+├── group_messages/          # 群消息模块
+│   ├── models/              # 群消息模型（含 JOIN 发送者信息）
+│   ├── services/            # 群消息服务（JOIN 优化）
+│   └── handlers/            # HTTP 请求处理
+├── websocket/               # WebSocket 实时通信模块
+│   ├── models/              # WS 消息协议
+│   ├── services/            # 连接管理、通知服务、未读消息
+│   └── handlers/            # WS 连接处理
+├── profile/                 # 个人资料模块
+│   ├── models/              # 请求/响应模型
+│   ├── services/            # 业务逻辑（资料管理）
+│   └── handlers/            # HTTP 请求处理
+├── storage/                 # 对象存储模块
+│   ├── client.rs            # S3/MinIO 客户端
+│   └── services/            # 文件存储服务
+├── common/                  # 公共模块
+│   ├── errors.rs            # 统一错误类型
+│   ├── response.rs          # 统一响应格式
+│   └── message_archive_service.rs  # 消息归档服务
+├── config.rs                # 配置管理
+├── app_state.rs             # 应用状态
+├── main.rs                  # 应用入口
+└── lib.rs                   # 库导出
+
+PostgreSQL/
+├── init/                    # 数据库初始化脚本
+│   ├── 01_core_tables.sql   # 核心表
+│   ├── 02_auth_system.sql   # 认证系统表
+│   ├── 03_friend_system.sql # 好友系统表
+│   ├── 04_file_system.sql   # 文件系统表
+│   ├── 05_indexes.sql       # 性能索引
+│   ├── 06_group_system.sql  # 群聊系统表
+│   └── 07_message_optimization.sql  # 消息优化（复合索引+缓存+归档）
+└── 数据结构说明.md           # 数据库文档
 
 接口调取文档/
-├── auth/                  # 认证接口文档
-├── friends/               # 好友接口文档
-└── profile/               # 个人资料接口文档
+├── auth/                    # 认证接口文档
+├── friends/                 # 好友接口文档
+├── messages/                # 好友消息接口文档
+├── groups/                  # 群聊接口文档
+├── group_messages/          # 群消息接口文档
+├── storage/                 # 文件存储接口文档
+└── profile/                 # 个人资料接口文档
 ```
 
 ## 🚀 快速开始
@@ -162,6 +192,44 @@ cargo run
 | PUT | `/api/profile` | 更新邮箱/签名 |
 | PUT | `/api/profile/password` | 修改密码 |
 | POST | `/api/profile/avatar` | 上传头像 |
+
+### 好友消息端点（需要 Token）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/messages` | 发送消息 |
+| GET | `/api/messages` | 获取消息列表（`before_time` 时间戳分页） |
+| DELETE | `/api/messages/delete` | 删除消息 |
+| POST | `/api/messages/recall` | 撤回消息 |
+
+### 群聊端点（需要 Token）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/groups` | 创建群聊 |
+| GET | `/api/groups/my` | 获取我的群聊 |
+| GET | `/api/groups/{id}` | 获取群详情 |
+| PUT | `/api/groups/{id}` | 更新群信息 |
+| DELETE | `/api/groups/{id}` | 解散群聊 |
+| GET | `/api/groups/{id}/members` | 获取成员列表 |
+| POST | `/api/groups/{id}/invite` | 邀请成员 |
+| POST | `/api/groups/{id}/leave` | 退出群聊 |
+
+### 群消息端点（需要 Token）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/group-messages` | 发送群消息 |
+| GET | `/api/group-messages` | 获取消息列表（`before_time` 时间戳分页，JOIN 优化） |
+| DELETE | `/api/group-messages/delete` | 删除消息（个人） |
+| POST | `/api/group-messages/recall` | 撤回消息 |
+
+### WebSocket 端点
+
+| 路径 | 说明 |
+|------|------|
+| `/ws` | WebSocket 连接（需 Token 参数） |
+| `/ws/status` | 连接状态检查 |
 
 ## 📖 使用示例
 
@@ -276,10 +344,17 @@ await fetch('http://localhost:8080/api/auth/logout', {
 
 详见 `PostgreSQL/数据结构说明.md`
 
-核心表：
-- `users` - 用户信息
-- `user-refresh-tokens` - Refresh Token 管理
-- `token-blacklist` - Token 黑名单
+核心表（24张表）：
+- **用户与认证**：`users`, `user-refresh-tokens`, `token-blacklist`, `user-access-cache`, `user-storage-quotas`
+- **好友系统**：`friendships`, `friend-requests`, `friend-messages`, `friend-unread-messages`
+- **群聊系统**：`groups`, `group-members`, `group-join-requests`, `group-invite-codes`, `group-notices`, `group-messages`, `group-message-deletions`, `group-unread-messages`
+- **文件存储**：`file-records`, `file-uuid-mapping`, `file-access-permissions`
+- **消息归档**：`friend-messages-archive`, `group-messages-archive`, `group-message-cache`
+
+性能优化索引：
+- `idx-friend-messages-conv-time` - 好友消息会话+时间复合索引
+- `idx-group-messages-group-time` - 群消息群ID+时间复合索引
+- `idx-group-messages-sender-time` - 群消息发送者+时间索引
 
 ## 📦 依赖清单
 
@@ -361,6 +436,21 @@ MINIO_REGION=us-east-1
 # 日志配置
 # ========================================
 RUST_LOG=info,sqlx=warn,hyper=info
+
+# ========================================
+# 消息配置
+# ========================================
+MESSAGE_RECALL_WINDOW_SECONDS=120    # 消息撤回窗口（秒），默认 2 分钟
+MESSAGE_ARCHIVE_DAYS=30              # 消息归档天数，默认 30 天
+MESSAGE_ARCHIVE_INTERVAL_SECONDS=86400  # 归档检查间隔，默认 24 小时
+MESSAGE_CACHE_TTL_SECONDS=3600       # 消息缓存 TTL，默认 1 小时
+
+# ========================================
+# WebSocket 配置
+# ========================================
+WS_ENABLE_READ_RECEIPT=true          # 是否启用已读回执
+WS_HEARTBEAT_INTERVAL_SECONDS=30     # 心跳间隔
+WS_CLIENT_TIMEOUT_SECONDS=60         # 客户端超时
 ```
 
 ### 环境变量说明
@@ -385,6 +475,23 @@ RUST_LOG=info,sqlx=warn,hyper=info
 - ⚠️ 生产环境**必须**明确指定允许的域名，**禁止**使用 `*`
 - ✅ 开发环境可以使用 `*` 简化调试
 - ✅ 支持多个域名，用逗号分隔
+
+#### 消息配置
+
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `MESSAGE_RECALL_WINDOW_SECONDS` | 120 | 消息撤回窗口（秒） |
+| `MESSAGE_ARCHIVE_DAYS` | 30 | 消息归档天数 |
+| `MESSAGE_ARCHIVE_INTERVAL_SECONDS` | 86400 | 归档检查间隔（秒） |
+| `MESSAGE_CACHE_TTL_SECONDS` | 3600 | 消息缓存 TTL（秒） |
+
+#### WebSocket 配置
+
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `WS_ENABLE_READ_RECEIPT` | true | 是否启用已读回执 |
+| `WS_HEARTBEAT_INTERVAL_SECONDS` | 30 | 心跳间隔（秒） |
+| `WS_CLIENT_TIMEOUT_SECONDS` | 60 | 客户端超时（秒） |
 
 ## 🔧 开发
 

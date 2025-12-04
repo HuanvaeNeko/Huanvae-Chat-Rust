@@ -51,10 +51,7 @@ impl GroupMessageService {
         .bind(now)
         .execute(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("发送群消息失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("发送群消息失败: {}", e)))?;
 
         // 更新所有群成员的未读消息计数
         sqlx::query(
@@ -90,20 +87,30 @@ impl GroupMessageService {
     }
 
     /// 获取群消息列表
+    /// 获取群消息列表（优化版：JOIN一次性获取用户信息 + 时间戳分页）
     pub async fn get_messages(
         &self,
         group_id: &Uuid,
         user_id: &str,
-        before_uuid: Option<&Uuid>,
+        before_time: Option<chrono::DateTime<Utc>>,
         limit: i32,
     ) -> Result<GroupMessagesResponse, AppError> {
-        let messages: Vec<GroupMessage> = if let Some(before) = before_uuid {
+        // 使用 JOIN 一次性获取消息和发送者信息，消除 N+1 问题
+        // 使用复合索引 idx-group-messages-group-time 优化查询
+        let messages: Vec<GroupMessageWithSender> = if let Some(before) = before_time {
             sqlx::query_as(
-                r#"SELECT m.* FROM "group-messages" m
+                r#"SELECT 
+                    m."message-uuid", m."group-id", m."sender-id", m."message-content",
+                    m."message-type", m."file-uuid", m."file-url", m."file-size",
+                    m."reply-to", m."send-time", m."is-recalled", m."recalled-at", m."recalled-by",
+                    u."user-nickname" as sender_nickname,
+                    u."user-avatar-url" as sender_avatar_url
+                   FROM "group-messages" m
+                   LEFT JOIN "users" u ON u."user-id" = m."sender-id"
                    LEFT JOIN "group-message-deletions" d 
                      ON d."message-uuid" = m."message-uuid" AND d."user-id" = $1
                    WHERE m."group-id" = $2 
-                     AND m."send-time" < (SELECT "send-time" FROM "group-messages" WHERE "message-uuid" = $3)
+                     AND m."send-time" < $3
                      AND d."id" IS NULL
                    ORDER BY m."send-time" DESC
                    LIMIT $4"#,
@@ -116,7 +123,14 @@ impl GroupMessageService {
             .await
         } else {
             sqlx::query_as(
-                r#"SELECT m.* FROM "group-messages" m
+                r#"SELECT 
+                    m."message-uuid", m."group-id", m."sender-id", m."message-content",
+                    m."message-type", m."file-uuid", m."file-url", m."file-size",
+                    m."reply-to", m."send-time", m."is-recalled", m."recalled-at", m."recalled-by",
+                    u."user-nickname" as sender_nickname,
+                    u."user-avatar-url" as sender_avatar_url
+                   FROM "group-messages" m
+                   LEFT JOIN "users" u ON u."user-id" = m."sender-id"
                    LEFT JOIN "group-message-deletions" d 
                      ON d."message-uuid" = m."message-uuid" AND d."user-id" = $1
                    WHERE m."group-id" = $2 AND d."id" IS NULL
@@ -129,33 +143,14 @@ impl GroupMessageService {
             .fetch_all(&self.db)
             .await
         }
-        .map_err(|e| {
-            tracing::error!("查询群消息失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("查询群消息失败: {}", e)))?;
 
         let has_more = messages.len() > limit as usize;
-        let messages: Vec<GroupMessage> = messages.into_iter().take(limit as usize).collect();
-
-        // 获取发送者信息
-        let mut result = Vec::new();
-        for msg in messages {
-            let sender_info: Option<(Option<String>, Option<String>)> = sqlx::query_as(
-                r#"SELECT "user-nickname", "user-avatar-url" FROM "users" WHERE "user-id" = $1"#,
-            )
-            .bind(&msg.sender_id)
-            .fetch_optional(&self.db)
-            .await
-            .ok()
-            .flatten();
-
-            let mut info = GroupMessageInfo::from(msg);
-            if let Some((nickname, avatar)) = sender_info {
-                info.sender_nickname = nickname;
-                info.sender_avatar_url = avatar;
-            }
-            result.push(info);
-        }
+        let result: Vec<GroupMessageInfo> = messages
+            .into_iter()
+            .take(limit as usize)
+            .map(GroupMessageInfo::from)
+            .collect();
 
         Ok(GroupMessagesResponse {
             messages: result,
@@ -176,7 +171,7 @@ impl GroupMessageService {
         .bind(message_uuid)
         .fetch_optional(&self.db)
         .await
-        .map_err(|_| AppError::Internal)?;
+        .map_err(|e| AppError::Database(format!("查询消息失败: {}", e)))?;
 
         if exists.is_none() {
             return Err(AppError::BadRequest("消息不存在".to_string()));
@@ -192,10 +187,7 @@ impl GroupMessageService {
         .bind(user_id)
         .execute(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("删除消息失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("删除消息失败: {}", e)))?;
 
         Ok(())
     }
@@ -218,7 +210,7 @@ impl GroupMessageService {
         .bind(message_uuid)
         .fetch_optional(&self.db)
         .await
-        .map_err(|_| AppError::Internal)?;
+        .map_err(|e| AppError::Database(format!("查询消息失败: {}", e)))?;
 
         let (sender_id, send_time) = message.ok_or_else(|| {
             AppError::BadRequest("消息不存在或已撤回".to_string())
@@ -258,10 +250,7 @@ impl GroupMessageService {
         .bind(message_uuid)
         .execute(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("撤回消息失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("撤回消息失败: {}", e)))?;
 
         Ok(())
     }
@@ -280,10 +269,7 @@ impl GroupMessageService {
         .bind(user_id)
         .execute(&self.db)
         .await
-        .map_err(|e| {
-            tracing::error!("标记已读失败: {}", e);
-            AppError::Internal
-        })?;
+        .map_err(|e| AppError::Database(format!("标记已读失败: {}", e)))?;
 
         Ok(())
     }

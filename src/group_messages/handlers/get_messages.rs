@@ -1,6 +1,7 @@
 //! 获取群消息处理器
 
 use axum::{extract::{Query, State}, Extension, Json};
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 use crate::auth::middleware::AuthContext;
 use crate::common::{ApiResponse, AppError};
@@ -8,7 +9,7 @@ use crate::group_messages::models::{GetGroupMessagesQuery, GroupMessagesResponse
 use super::state::GroupMessagesState;
 
 /// 获取群消息列表
-/// GET /api/group-messages?group_id=xxx&before_uuid=xxx&limit=50
+/// GET /api/group-messages?group_id=xxx&before_time=xxx&limit=50
 pub async fn get_messages(
     State(state): State<GroupMessagesState>,
     Extension(auth): Extension<AuthContext>,
@@ -23,8 +24,11 @@ pub async fn get_messages(
         return Err(AppError::Forbidden);
     }
 
-    let before_uuid = if let Some(ref uuid_str) = query.before_uuid {
-        Some(Uuid::parse_str(uuid_str).map_err(|_| AppError::BadRequest("无效的消息ID".to_string()))?)
+    // 解析时间戳参数（优先使用 before_time）
+    let before_time: Option<DateTime<Utc>> = if let Some(ref time_str) = query.before_time {
+        DateTime::parse_from_rfc3339(time_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .ok()
     } else {
         None
     };
@@ -34,7 +38,7 @@ pub async fn get_messages(
     let response = state.message_service.get_messages(
         &group_id,
         &auth.user_id,
-        before_uuid.as_ref(),
+        before_time,
         limit,
     ).await?;
 

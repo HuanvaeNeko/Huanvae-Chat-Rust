@@ -14,6 +14,10 @@ use crate::groups::handlers::GroupsState;
 use crate::group_messages::handlers::GroupMessagesState;
 use crate::profile::handlers::routes::ProfileAppState;
 use crate::storage::S3Client;
+use crate::websocket::{
+    handlers::WsState,
+    services::{ConnectionManager, NotificationService, UnreadService},
+};
 use sqlx::PgPool;
 use std::sync::Arc;
 
@@ -39,6 +43,12 @@ pub struct AppState {
 
     /// API 基础 URL
     pub api_base_url: String,
+
+    /// WebSocket 连接管理器
+    pub connection_manager: Arc<ConnectionManager>,
+
+    /// WebSocket 通知服务
+    pub notification_service: NotificationService,
 }
 
 impl AppState {
@@ -59,6 +69,11 @@ impl AppState {
         let blacklist_service = Arc::new(BlacklistService::new(db.clone()));
         let device_service = Arc::new(DeviceService::new(db.clone()));
 
+        // WebSocket 相关服务
+        let connection_manager = Arc::new(ConnectionManager::new());
+        let notification_service =
+            NotificationService::new(db.clone(), connection_manager.clone());
+
         Self {
             db,
             token_service,
@@ -66,6 +81,8 @@ impl AppState {
             device_service,
             s3_client,
             api_base_url,
+            connection_manager,
+            notification_service,
         }
     }
 
@@ -129,7 +146,7 @@ impl AppState {
 
     /// 获取消息模块状态
     pub fn messages_state(&self) -> MessagesState {
-        MessagesState::new(self.db.clone())
+        MessagesState::with_notification(self.db.clone(), self.notification_service.clone())
     }
 
     /// 获取个人资料模块状态
@@ -143,12 +160,32 @@ impl AppState {
 
     /// 获取群聊模块状态
     pub fn groups_state(&self) -> GroupsState {
-        GroupsState::new(self.db.clone())
+        GroupsState::new(self.db.clone(), self.s3_client.clone())
     }
 
     /// 获取群消息模块状态
     pub fn group_messages_state(&self) -> GroupMessagesState {
-        GroupMessagesState::new(self.db.clone())
+        GroupMessagesState::with_notification(self.db.clone(), self.notification_service.clone())
+    }
+
+    /// 获取 WebSocket 模块状态
+    pub fn ws_state(&self) -> WsState {
+        WsState::new(
+            self.connection_manager.clone(),
+            self.notification_service.clone(),
+            UnreadService::new(self.db.clone()),
+            self.token_service.clone(),
+        )
+    }
+
+    /// 获取通知服务（供其他模块使用）
+    pub fn notification_service(&self) -> &NotificationService {
+        &self.notification_service
+    }
+
+    /// 获取连接管理器（供其他模块使用）
+    pub fn connection_manager(&self) -> &Arc<ConnectionManager> {
+        &self.connection_manager
     }
 }
 
