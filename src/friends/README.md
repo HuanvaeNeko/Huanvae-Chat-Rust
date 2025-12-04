@@ -170,12 +170,15 @@ curl -X GET http://localhost:8080/api/friends \
     {
       "friend_id": "user_b",
       "friend_nickname": "用户B:特殊;字符",
+      "friend_avatar_url": "http://localhost/avatars/user_b.jpg",
       "add_time": "2025-12-02T11:05:01.202820+00:00",
       "approve_reason": null
     }
   ]
 }
 ```
+
+> **说明**: `friend_avatar_url` 字段返回好友的头像URL，若好友未设置头像则为 `null`。
 
 ## 🏗️ 设计原则
 

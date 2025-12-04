@@ -563,18 +563,25 @@ impl FileService {
         .await?
         .ok_or_else(|| AppError::Forbidden)?;
 
-        // 3. 根据physical_file_key判断bucket
-        // physical_file_key格式: user_id/type/timestamp_hash_filename
+        // 3. 根据physical_file_key前缀判断bucket
+        // physical_file_key格式:
+        //   - 个人文件: {user_id}/{type}/{timestamp}_{hash}_{filename}
+        //   - 好友文件: conv-{user1}-{user2}/{type}/{timestamp}_{hash}_{filename}
+        //   - 群文件: {group_uuid}/{type}/{timestamp}_{hash}_{filename}
         let physical_file_key = &mapping.physical_file_key;
-        let bucket = if physical_file_key.contains("/images/") {
-            "user-file"
-        } else if physical_file_key.contains("/videos/") {
-            "user-file"
-        } else if physical_file_key.contains("/files/") {
-            "user-file"
+        let bucket = if physical_file_key.starts_with("conv-") {
+            // 好友消息文件
+            "friends-file"
         } else {
-            // 默认使用user-file bucket
-            "user-file"
+            // 检查第一段是否为UUID格式（群文件）
+            let first_segment = physical_file_key.split('/').next().unwrap_or("");
+            if uuid::Uuid::parse_str(first_segment).is_ok() {
+                // 群文件
+                "group-file"
+            } else {
+                // 个人文件
+                "user-file"
+            }
         };
 
         // 4. 生成预签名下载URL
@@ -608,6 +615,7 @@ impl FileService {
     }
 
     /// 查询用户文件列表（支持分页、过滤、排序）
+    /// 只返回用户个人文件（storage_location = 'user_files'），不包含好友和群聊文件
     pub async fn list_user_files(
         &self,
         user_id: &str,
@@ -621,35 +629,46 @@ impl FileService {
         let limit = limit.clamp(1, 100);
         let offset = (page - 1) * limit;
         
-        // 2. 确定排序字段
+        // 2. 确定排序字段（用于子查询外部排序，字段来自子查询结果）
         let sort_column = match sort_by.as_str() {
-            "file_size" => r#"m."file-size""#,
-            _ => r#"m."created-at""#,
+            "file_size" => r#""file-size""#,
+            _ => r#""created-at""#,
         };
         let sort_dir = if sort_order == "asc" { "ASC" } else { "DESC" };
         
-        // 3. 查询总数
+        // 3. 查询总数（只统计个人文件）
         let total: i64 = sqlx::query_scalar(
             r#"
-            SELECT COUNT(*) as count
+            SELECT COUNT(DISTINCT m."uuid") as count
             FROM "file-uuid-mapping" m
             INNER JOIN "file-access-permissions" p ON m."uuid" = p."file-uuid"
-            WHERE p."user-id" = $1 AND p."revoked-at" IS NULL
+            INNER JOIN "file-records" r ON r."file-uuid" = m."uuid"
+            WHERE p."user-id" = $1 
+              AND p."revoked-at" IS NULL
+              AND r."owner-id" = $1
+              AND r."storage-location" = 'user_files'
             "#
         )
         .bind(user_id)
         .fetch_one(&self.db)
         .await?;
         
-        // 4. 构建查询SQL
+        // 4. 构建查询SQL（只查询个人文件，使用子查询去重后排序）
         let query_sql = format!(
             r#"
-            SELECT 
-                m."uuid", m."physical-file-key", m."file-size", 
-                m."content-type", m."preview-support", m."created-at"
-            FROM "file-uuid-mapping" m
-            INNER JOIN "file-access-permissions" p ON m."uuid" = p."file-uuid"
-            WHERE p."user-id" = $1 AND p."revoked-at" IS NULL
+            SELECT * FROM (
+                SELECT DISTINCT ON (m."uuid")
+                    m."uuid", m."physical-file-key", m."file-size", 
+                    m."content-type", m."preview-support", m."created-at"
+                FROM "file-uuid-mapping" m
+                INNER JOIN "file-access-permissions" p ON m."uuid" = p."file-uuid"
+                INNER JOIN "file-records" r ON r."file-uuid" = m."uuid"
+                WHERE p."user-id" = $1 
+                  AND p."revoked-at" IS NULL
+                  AND r."owner-id" = $1
+                  AND r."storage-location" = 'user_files'
+                ORDER BY m."uuid"
+            ) AS unique_files
             ORDER BY {} {}
             LIMIT $2 OFFSET $3
             "#,

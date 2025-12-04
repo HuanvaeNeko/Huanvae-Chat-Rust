@@ -3,10 +3,10 @@
  */
 
 export const state = {
-  apiBase: localStorage.getItem('apiBase') || 'http://localhost:8080/api/auth',
-  friendsBase: localStorage.getItem('friendsApiBase') || 'http://localhost:8080/api/friends',
-  messagesBase: localStorage.getItem('messagesApiBase') || 'http://localhost:8080/api/messages',
-  storageBase: localStorage.getItem('storageApiBase') || 'http://localhost:8080/api/storage',
+  apiBase: localStorage.getItem('apiBase') || 'http://localhost/api/auth',
+  friendsBase: localStorage.getItem('friendsApiBase') || 'http://localhost/api/friends',
+  messagesBase: localStorage.getItem('messagesApiBase') || 'http://localhost/api/messages',
+  storageBase: localStorage.getItem('storageApiBase') || 'http://localhost/api/storage',
   accessToken: localStorage.getItem('accessToken') || '',
   refreshToken: localStorage.getItem('refreshToken') || '',
   uploadedFiles: JSON.parse(localStorage.getItem('uploadedFiles') || '[]'),

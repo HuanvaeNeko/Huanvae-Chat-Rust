@@ -20,6 +20,7 @@ pub struct PendingRequestDto {
 pub struct FriendDto {
     pub friend_id: String,
     pub friend_nickname: Option<String>,
+    pub friend_avatar_url: Option<String>,
     pub add_time: String,
     pub approve_reason: Option<String>,
 }

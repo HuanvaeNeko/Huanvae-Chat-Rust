@@ -504,15 +504,20 @@ function renderFriendsList() {
     return;
   }
   
-  container.innerHTML = state.friends.map(f => `
-    <div class="contact-item" onclick="openChat('friend', '${f.friend_id}', '${f.friend_nickname || f.friend_id}')">
-      <div class="item-avatar">👤</div>
-      <div class="item-info">
-        <div class="item-name">${f.friend_nickname || f.friend_id}</div>
-        <div class="item-preview">${f.friend_id}</div>
+  container.innerHTML = state.friends.map(f => {
+    const avatarHtml = f.friend_avatar_url 
+      ? `<img src="${f.friend_avatar_url}" alt="头像" class="avatar-img" onerror="this.parentElement.innerHTML='👤'">`
+      : '👤';
+    return `
+      <div class="contact-item" onclick="openChat('friend', '${f.friend_id}', '${f.friend_nickname || f.friend_id}')">
+        <div class="item-avatar">${avatarHtml}</div>
+        <div class="item-info">
+          <div class="item-name">${f.friend_nickname || f.friend_id}</div>
+          <div class="item-preview">${f.friend_id}</div>
+        </div>
       </div>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
 // 加载待处理请求
@@ -1144,9 +1149,27 @@ function renderMessages(messages) {
     return;
   }
   
-  container.innerHTML = messages.map(msg => {
+  // 翻转消息顺序：后端返回最新在前，前端需要最新在后（底部）
+  const sortedMessages = [...messages].reverse();
+  
+  container.innerHTML = sortedMessages.map(msg => {
     const isSelf = msg.sender_id === myId;
     const hasFile = msg.file_uuid && msg.file_uuid !== 'null';
+    
+    // 获取头像
+    let avatarHtml = '👤';
+    if (isSelf) {
+      // 自己的头像
+      if (state.userProfile?.avatar_url) {
+        avatarHtml = `<img src="${state.userProfile.avatar_url}" alt="头像" class="avatar-img" onerror="this.parentElement.innerHTML='👤'">`;
+      }
+    } else if (state.currentChat?.type === 'friend') {
+      // 好友头像：从好友列表查找
+      const friend = state.friends.find(f => f.friend_id === msg.sender_id);
+      if (friend?.friend_avatar_url) {
+        avatarHtml = `<img src="${friend.friend_avatar_url}" alt="头像" class="avatar-img" onerror="this.parentElement.innerHTML='👤'">`;
+      }
+    }
     
     let contentHtml = `<div class="message-text">${escapeHtml(msg.message_content)}</div>`;
     
@@ -1170,7 +1193,7 @@ function renderMessages(messages) {
     
     return `
       <div class="message ${isSelf ? 'self' : ''}">
-        <div class="message-avatar">${isSelf ? '👤' : '👤'}</div>
+        <div class="message-avatar">${avatarHtml}</div>
         <div class="message-body">
           ${!isSelf && state.currentChat?.type === 'group' ? `<div class="message-sender">${msg.sender_id}</div>` : ''}
           <div class="message-bubble">${contentHtml}</div>
@@ -1467,7 +1490,7 @@ function renderMyFiles(files) {
       <div class="file-card" onclick="downloadFile('${f.file_uuid}')">
         <span class="file-icon">${icon}</span>
         <div class="file-info">
-          <div class="file-name">${f.original_filename || '未命名'}</div>
+          <div class="file-name">${f.filename || '未命名'}</div>
           <div class="file-meta">${formatSize(f.file_size)} · ${formatTime(f.created_at)}</div>
         </div>
       </div>

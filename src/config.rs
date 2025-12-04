@@ -236,38 +236,6 @@ impl JwtConfig {
     }
 }
 
-/// CORS 配置
-#[derive(Clone, Debug)]
-pub struct CorsConfig {
-    /// 允许的来源（"*" 表示允许所有，多个来源用逗号分隔）
-    pub allowed_origins: String,
-    /// 预检请求缓存时间（秒），默认 3600
-    pub max_age_secs: u64,
-}
-
-impl Default for CorsConfig {
-    fn default() -> Self {
-        Self {
-            allowed_origins: "*".to_string(),
-            max_age_secs: 3600,
-        }
-    }
-}
-
-impl CorsConfig {
-    /// 从环境变量加载配置
-    pub fn from_env() -> Self {
-        Self {
-            allowed_origins: env::var("CORS_ALLOWED_ORIGINS")
-                .unwrap_or_else(|_| "*".to_string()),
-            max_age_secs: env::var("CORS_MAX_AGE")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(3600),
-        }
-    }
-}
-
 /// MinIO/S3 存储服务配置
 #[derive(Clone, Debug)]
 pub struct MinioConfig {
@@ -383,8 +351,6 @@ pub struct AppConfig {
     pub database: DatabaseConfig,
     /// JWT 配置
     pub jwt: JwtConfig,
-    /// CORS 配置
-    pub cors: CorsConfig,
     /// 定时清理任务配置
     pub cleanup: CleanupConfig,
     /// MinIO/S3 存储服务配置
@@ -401,7 +367,6 @@ impl Default for AppConfig {
             server: ServerConfig::default(),
             database: DatabaseConfig::default(),
             jwt: JwtConfig::default(),
-            cors: CorsConfig::default(),
             cleanup: CleanupConfig::default(),
             minio: MinioConfig::default(),
         }
@@ -420,7 +385,6 @@ impl AppConfig {
             server: ServerConfig::from_env(),
             database: DatabaseConfig::from_env(),
             jwt: JwtConfig::from_env(),
-            cors: CorsConfig::from_env(),
             cleanup: CleanupConfig::from_env(),
             minio: MinioConfig::from_env().unwrap_or_default(),
         }
@@ -468,11 +432,6 @@ pub fn database_config() -> &'static DatabaseConfig {
 /// 获取 JWT 配置
 pub fn jwt_config() -> &'static JwtConfig {
     &get_config().jwt
-}
-
-/// 获取 CORS 配置
-pub fn cors_config() -> &'static CorsConfig {
-    &get_config().cors
 }
 
 /// 获取清理任务配置

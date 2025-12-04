@@ -15,84 +15,6 @@ use huanvae_chat::group_messages::create_group_messages_routes;
 use huanvae_chat::profile::handlers::routes::profile_routes;
 use huanvae_chat::storage::{create_storage_routes, S3Client};
 
-/// 配置CORS中间件（从统一配置读取）
-fn configure_cors() -> tower_http::cors::CorsLayer {
-    use tower_http::cors::{CorsLayer, AllowOrigin};
-    use axum::http::{Method, HeaderValue, header};
-
-    let cors_config = &get_config().cors;
-    let allowed_origins_str = &cors_config.allowed_origins;
-
-    tracing::info!("🔐 CORS配置: allowed_origins={}", allowed_origins_str);
-
-    let cors = if allowed_origins_str == "*" {
-        // 开发环境：允许所有来源
-        tracing::warn!("⚠️  警告: CORS配置为允许所有来源，仅适用于开发环境！");
-        CorsLayer::new()
-            .allow_origin(tower_http::cors::Any)
-            .allow_methods([
-                Method::GET,
-                Method::POST,
-                Method::PUT,
-                Method::DELETE,
-                Method::PATCH,
-                Method::OPTIONS,
-            ])
-            .allow_headers([
-                header::AUTHORIZATION,
-                header::CONTENT_TYPE,
-                header::ACCEPT,
-            ])
-            .allow_credentials(false)
-    } else {
-        // 生产环境：限制特定来源
-        let origins: Vec<HeaderValue> = allowed_origins_str
-            .split(',')
-            .filter_map(|s| {
-                let trimmed = s.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    match trimmed.parse::<HeaderValue>() {
-                        Ok(val) => {
-                            tracing::info!("  ✅ 允许来源: {}", trimmed);
-                            Some(val)
-                        }
-                        Err(e) => {
-                            tracing::error!("  ❌ 无效的来源 '{}': {}", trimmed, e);
-                            None
-                        }
-                    }
-                }
-            })
-            .collect();
-
-        if origins.is_empty() {
-            tracing::warn!("⚠️  未配置有效的CORS来源，将拒绝所有跨域请求");
-        }
-
-        CorsLayer::new()
-            .allow_origin(AllowOrigin::list(origins))
-            .allow_methods([
-                Method::GET,
-                Method::POST,
-                Method::PUT,
-                Method::DELETE,
-                Method::PATCH,
-                Method::OPTIONS,
-            ])
-            .allow_headers([
-                header::AUTHORIZATION,
-                header::CONTENT_TYPE,
-                header::ACCEPT,
-            ])
-            .allow_credentials(true)
-            .max_age(Duration::from_secs(cors_config.max_age_secs))
-    };
-
-    cors
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. 加载环境变量
@@ -268,9 +190,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/group-messages",
             create_group_messages_routes(app_state.group_messages_state(), app_state.auth_state()),
         )
-        // CORS 中间件（从环境变量读取配置）
-        .layer(configure_cors())
-        // 日志中间件
+        // 日志中间件（CORS 由 Nginx 统一处理）
         .layer(tower_http::trace::TraceLayer::new_for_http());
 
     // 10. 启动服务器（从统一配置读取端口）

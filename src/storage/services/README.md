@@ -22,7 +22,7 @@
 
 ### 文件大小限制
 
-- 最大：5 MB (5,242,880 bytes)
+- 最大：10 MB (10,485,760 bytes)
 
 ### 存储路径
 
@@ -107,7 +107,7 @@ pub async fn upload_avatar(
 - `Err(e)`: 上传失败或验证失败
 
 **处理流程**：
-1. 验证文件大小（≤ 5MB）
+1. 验证文件大小（≤ 10MB）
 2. 验证文件扩展名（jpg/png/gif/webp）
 3. 上传到 MinIO `avatars` bucket
 4. 返回公开访问 URL
