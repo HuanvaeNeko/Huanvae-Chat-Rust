@@ -3,11 +3,12 @@ use axum::{
     http::StatusCode,
     Extension, Json,
 };
+use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::auth::middleware::AuthContext;
@@ -18,6 +19,7 @@ use crate::groups::services::MemberService as GroupMemberService;
 use crate::storage::client::S3Client;
 use crate::storage::models::*;
 use crate::storage::services::FileService;
+use crate::websocket::NotificationService;
 
 /// Storage状态
 #[derive(Clone)]
@@ -28,6 +30,7 @@ pub struct StorageState {
     pub message_service: MessageService,
     pub group_message_service: GroupMessageService,
     pub group_member_service: GroupMemberService,
+    pub notification_service: Option<NotificationService>,
 }
 
 impl StorageState {
@@ -43,7 +46,14 @@ impl StorageState {
             message_service,
             group_message_service,
             group_member_service,
+            notification_service: None,
         }
+    }
+    
+    /// 设置 NotificationService（用于文件上传后发送实时通知）
+    pub fn with_notification(mut self, notification_service: NotificationService) -> Self {
+        self.notification_service = Some(notification_service);
+        self
     }
 }
 
@@ -160,8 +170,28 @@ pub async fn request_upload(
                     ).await {
                         Ok((msg_uuid, send_time)) => {
                             info!("秒传文件消息已自动发送: {}", msg_uuid);
-                            response.message_uuid = Some(msg_uuid);
-                            response.message_send_time = Some(send_time);
+                            response.message_uuid = Some(msg_uuid.clone());
+                            response.message_send_time = Some(send_time.clone());
+                            
+                            // 发送 WebSocket 实时通知
+                            if let Some(ref notification_service) = state.notification_service {
+                                let sender_nickname = get_user_nickname(&state.db, &auth_ctx.user_id).await;
+                                let send_time_dt = chrono::DateTime::parse_from_rfc3339(&send_time)
+                                    .map(|dt| dt.with_timezone(&Utc))
+                                    .unwrap_or_else(|_| Utc::now());
+                                
+                                if let Err(e) = notification_service.notify_friend_message(
+                                    &auth_ctx.user_id,
+                                    &sender_nickname,
+                                    friend_id,
+                                    &msg_uuid,
+                                    &message_content,
+                                    &message_type,
+                                    send_time_dt,
+                                ).await {
+                                    warn!("秒传文件 WebSocket 通知失败: {}", e);
+                                }
+                            }
                         }
                         Err(e) => {
                             error!("秒传文件消息发送失败: {}", e);
@@ -201,8 +231,32 @@ pub async fn request_upload(
                         ).await {
                             Ok(resp) => {
                                 info!("群文件秒传消息已自动发送: {}", resp.message_uuid);
-                                response.message_uuid = Some(resp.message_uuid);
-                                response.message_send_time = Some(resp.send_time);
+                                response.message_uuid = Some(resp.message_uuid.clone());
+                                response.message_send_time = Some(resp.send_time.clone());
+                                
+                                // 发送 WebSocket 实时通知
+                                if let Some(ref notification_service) = state.notification_service {
+                                    let sender_nickname = get_user_nickname(&state.db, &auth_ctx.user_id).await;
+                                    let send_time_dt = chrono::DateTime::parse_from_rfc3339(&resp.send_time)
+                                        .map(|dt| dt.with_timezone(&Utc))
+                                        .unwrap_or_else(|_| Utc::now());
+                                    
+                                    // 解析 message_uuid 为 Uuid
+                                    if let Ok(msg_uuid) = Uuid::parse_str(&resp.message_uuid) {
+                                        if let Err(e) = notification_service.notify_group_message(
+                                            &group_uuid,
+                                            "",  // group_name（群名称，通知服务不使用）
+                                            &auth_ctx.user_id,
+                                            &sender_nickname,
+                                            &msg_uuid,
+                                            &message_content,
+                                            &message_type,
+                                            send_time_dt,
+                                        ).await {
+                                            warn!("群文件秒传 WebSocket 通知失败: {}", e);
+                                        }
+                                    }
+                                }
                             }
                             Err(e) => {
                                 error!("群文件秒传消息发送失败: {}", e);
@@ -373,8 +427,28 @@ pub async fn direct_upload(
                     ).await {
                         Ok((msg_uuid, send_time)) => {
                             info!("自动发送文件消息成功: {}", msg_uuid);
-                            message_uuid = Some(msg_uuid);
-                            message_send_time = Some(send_time);
+                            message_uuid = Some(msg_uuid.clone());
+                            message_send_time = Some(send_time.clone());
+                            
+                            // 发送 WebSocket 实时通知
+                            if let Some(ref notification_service) = state.notification_service {
+                                let sender_nickname = get_user_nickname(&state.db, &file_record.owner_id).await;
+                                let send_time_dt = chrono::DateTime::parse_from_rfc3339(&send_time)
+                                    .map(|dt| dt.with_timezone(&Utc))
+                                    .unwrap_or_else(|_| Utc::now());
+                                
+                                if let Err(e) = notification_service.notify_friend_message(
+                                    &file_record.owner_id,
+                                    &sender_nickname,
+                                    friend_id,
+                                    &msg_uuid,
+                                    &message_content,
+                                    &message_type,
+                                    send_time_dt,
+                                ).await {
+                                    warn!("好友文件上传 WebSocket 通知失败: {}", e);
+                                }
+                            }
                         }
                         Err(e) => {
                             error!("自动发送文件消息失败: {}", e);
@@ -408,8 +482,32 @@ pub async fn direct_upload(
                         ).await {
                             Ok(resp) => {
                                 info!("群文件消息自动发送成功: {}", resp.message_uuid);
-                                message_uuid = Some(resp.message_uuid);
-                                message_send_time = Some(resp.send_time);
+                                message_uuid = Some(resp.message_uuid.clone());
+                                message_send_time = Some(resp.send_time.clone());
+                                
+                                // 发送 WebSocket 实时通知
+                                if let Some(ref notification_service) = state.notification_service {
+                                    let sender_nickname = get_user_nickname(&state.db, &file_record.owner_id).await;
+                                    let send_time_dt = chrono::DateTime::parse_from_rfc3339(&resp.send_time)
+                                        .map(|dt| dt.with_timezone(&Utc))
+                                        .unwrap_or_else(|_| Utc::now());
+                                    
+                                    // 解析 message_uuid 为 Uuid
+                                    if let Ok(msg_uuid) = Uuid::parse_str(&resp.message_uuid) {
+                                        if let Err(e) = notification_service.notify_group_message(
+                                            &group_uuid,
+                                            "",  // group_name（群名称，通知服务不使用）
+                                            &file_record.owner_id,
+                                            &sender_nickname,
+                                            &msg_uuid,
+                                            &message_content,
+                                            &message_type,
+                                            send_time_dt,
+                                        ).await {
+                                            warn!("群文件上传 WebSocket 通知失败: {}", e);
+                                        }
+                                    }
+                                }
                             }
                             Err(e) => {
                                 error!("群文件消息自动发送失败: {}", e);
@@ -458,6 +556,19 @@ fn determine_message_type_and_content(content_type: &str, file_key: &str) -> (St
     }
 }
 
+/// 获取用户昵称（用于 WebSocket 通知）
+async fn get_user_nickname(db: &PgPool, user_id: &str) -> String {
+    sqlx::query_scalar::<_, String>(
+        r#"SELECT "user-nickname" FROM "users" WHERE "user-id" = $1"#,
+    )
+    .bind(user_id)
+    .fetch_optional(db)
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_else(|| user_id.to_string())
+}
+
 /// GET /api/storage/multipart/part-url
 /// 获取分片上传的预签名URL
 pub async fn get_multipart_part_url(
@@ -488,5 +599,187 @@ pub async fn get_multipart_part_url(
 #[derive(Debug, Deserialize)]
 pub struct DirectUploadQuery {
     pub token: String,
+}
+
+/// POST /api/storage/upload/confirm
+/// 预签名上传完成后调用此接口确认
+pub async fn confirm_presigned_upload(
+    State(state): State<StorageState>,
+    Extension(auth_ctx): Extension<AuthContext>,
+    Json(request): Json<ConfirmUploadRequest>,
+) -> Result<Json<FileCompleteResponse>, (StatusCode, Json<Value>)> {
+    info!("用户 {} 确认预签名上传: {}", auth_ctx.user_id, request.file_key);
+    
+    // 1. 验证并获取文件记录
+    let file_record = match state.file_service
+        .verify_and_complete_presigned_upload(&request.file_key, &auth_ctx.user_id)
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            error!("验证预签名上传失败: {}", e);
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": e.to_string() })),
+            ));
+        }
+    };
+    
+    let storage_loc: StorageLocation = file_record.storage_location.parse()
+        .map_err(|e: String| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e }))))?;
+    
+    // 2. 完成上传（创建UUID映射、权限授予）
+    let uuid_file_url = match state.file_service
+        .complete_presigned_upload(
+            &file_record.file_key,
+            &auth_ctx.user_id,
+            file_record.file_size,
+            &file_record.content_type,
+            &file_record.preview_support,
+            &file_record.storage_location,
+            file_record.related_id.as_deref(),
+            &file_record.file_hash,
+        )
+        .await
+    {
+        Ok(url) => url,
+        Err(e) => {
+            error!("完成预签名上传失败: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "完成上传失败" })),
+            ));
+        }
+    };
+    
+    info!("预签名上传确认成功: {}", file_record.file_key);
+    let preview_support = file_record.preview_support();
+    
+    let file_uuid = uuid_file_url
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .to_string();
+    
+    // 3. 好友文件：自动发送消息
+    let mut message_uuid: Option<String> = None;
+    let mut message_send_time: Option<String> = None;
+    
+    if storage_loc == StorageLocation::FriendMessages {
+        if let Some(friend_id) = &file_record.related_id {
+            let (message_type, message_content) = determine_message_type_and_content(
+                &file_record.content_type,
+                &file_record.file_key,
+            );
+            
+            info!("好友文件上传完成，自动发送 {} 消息给 {}", message_type, friend_id);
+            
+            match state.message_service.send_message(
+                &auth_ctx.user_id,
+                friend_id,
+                &message_content,
+                &message_type,
+                Some(file_uuid.clone()),
+                Some(uuid_file_url.clone()),
+                Some(file_record.file_size),
+            ).await {
+                Ok((msg_uuid, send_time)) => {
+                    info!("自动发送文件消息成功: {}", msg_uuid);
+                    message_uuid = Some(msg_uuid.clone());
+                    message_send_time = Some(send_time.clone());
+                    
+                    // 发送 WebSocket 实时通知
+                    if let Some(ref notification_service) = state.notification_service {
+                        let sender_nickname = get_user_nickname(&state.db, &auth_ctx.user_id).await;
+                        let send_time_dt = chrono::DateTime::parse_from_rfc3339(&send_time)
+                            .map(|dt| dt.with_timezone(&Utc))
+                            .unwrap_or_else(|_| Utc::now());
+                        
+                        if let Err(e) = notification_service.notify_friend_message(
+                            &auth_ctx.user_id,
+                            &sender_nickname,
+                            friend_id,
+                            &msg_uuid,
+                            &message_content,
+                            &message_type,
+                            send_time_dt,
+                        ).await {
+                            warn!("好友文件上传 WebSocket 通知失败: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("自动发送文件消息失败: {}", e);
+                }
+            }
+        }
+    }
+    
+    // 4. 群文件：自动发送群消息
+    if storage_loc == StorageLocation::GroupFiles {
+        if let Some(group_id_str) = &file_record.related_id {
+            if let Ok(group_uuid) = Uuid::parse_str(group_id_str) {
+                let (message_type, message_content) = determine_message_type_and_content(
+                    &file_record.content_type,
+                    &file_record.file_key,
+                );
+                
+                info!("群文件上传完成，自动发送 {} 消息到群 {}", message_type, group_id_str);
+                
+                match state.group_message_service.send_message(
+                    &group_uuid,
+                    &auth_ctx.user_id,
+                    &message_content,
+                    &message_type,
+                    Some(&file_uuid),
+                    Some(&uuid_file_url),
+                    Some(file_record.file_size),
+                    None,
+                ).await {
+                    Ok(resp) => {
+                        info!("群文件消息自动发送成功: {}", resp.message_uuid);
+                        message_uuid = Some(resp.message_uuid.clone());
+                        message_send_time = Some(resp.send_time.clone());
+                        
+                        // 发送 WebSocket 实时通知
+                        if let Some(ref notification_service) = state.notification_service {
+                            let sender_nickname = get_user_nickname(&state.db, &auth_ctx.user_id).await;
+                            let send_time_dt = chrono::DateTime::parse_from_rfc3339(&resp.send_time)
+                                .map(|dt| dt.with_timezone(&Utc))
+                                .unwrap_or_else(|_| Utc::now());
+                            
+                            if let Ok(msg_uuid) = Uuid::parse_str(&resp.message_uuid) {
+                                if let Err(e) = notification_service.notify_group_message(
+                                    &group_uuid,
+                                    "",
+                                    &auth_ctx.user_id,
+                                    &sender_nickname,
+                                    &msg_uuid,
+                                    &message_content,
+                                    &message_type,
+                                    send_time_dt,
+                                ).await {
+                                    warn!("群文件上传 WebSocket 通知失败: {}", e);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("群文件消息自动发送失败: {}", e);
+                    }
+                }
+            }
+        }
+    }
+    
+    Ok(Json(FileCompleteResponse {
+        file_url: uuid_file_url,
+        file_key: file_record.file_key.clone(),
+        file_size: file_record.file_size as u64,
+        content_type: file_record.content_type.clone(),
+        preview_support,
+        message_uuid,
+        message_send_time,
+    }))
 }
 

@@ -12,13 +12,9 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::auth::models::AccessTokenClaims;
+use crate::config::websocket_config;
 use crate::websocket::handlers::WsState;
 use crate::websocket::models::{ClientMessage, ServerMessage, SourceType};
-
-/// 心跳间隔（秒）
-const HEARTBEAT_INTERVAL: u64 = 30;
-/// 客户端超时（秒）
-const CLIENT_TIMEOUT: u64 = 60;
 
 /// 处理 WebSocket 连接
 pub async fn handle_socket(socket: WebSocket, claims: AccessTokenClaims, state: WsState) {
@@ -65,10 +61,15 @@ pub async fn handle_socket(socket: WebSocket, claims: AccessTokenClaims, state: 
         }
     });
 
+    // 从配置获取心跳间隔和超时时间
+    let ws_config = websocket_config();
+    let heartbeat_secs = ws_config.heartbeat_interval_secs;
+    let client_timeout_secs = ws_config.client_timeout_secs;
+    
     // 心跳任务
     let tx_heartbeat = tx.clone();
     let heartbeat_task = tokio::spawn(async move {
-        let mut heartbeat_interval = interval(Duration::from_secs(HEARTBEAT_INTERVAL));
+        let mut heartbeat_interval = interval(Duration::from_secs(heartbeat_secs));
         loop {
             heartbeat_interval.tick().await;
             let pong = ServerMessage::Pong {
@@ -83,10 +84,14 @@ pub async fn handle_socket(socket: WebSocket, claims: AccessTokenClaims, state: 
     // 接收任务：从 WebSocket 接收消息并处理
     let receive_task = tokio::spawn(async move {
         let mut last_activity = std::time::Instant::now();
+        
+        // 如果 client_timeout_secs 为 0，则永不超时
+        let use_timeout = client_timeout_secs > 0;
+        let timeout_duration = Duration::from_secs(client_timeout_secs.max(60)); // 最少60秒用于轮询
 
         loop {
-            // 带超时的接收
-            match timeout(Duration::from_secs(CLIENT_TIMEOUT), ws_receiver.next()).await {
+            // 带超时的接收（超时后检查活动时间，若 use_timeout=false 则不断开）
+            match timeout(timeout_duration, ws_receiver.next()).await {
                 Ok(Some(Ok(msg))) => {
                     last_activity = std::time::Instant::now();
 
@@ -128,11 +133,12 @@ pub async fn handle_socket(socket: WebSocket, claims: AccessTokenClaims, state: 
                     break;
                 }
                 Err(_) => {
-                    // 超时，检查最后活动时间
-                    if last_activity.elapsed() > Duration::from_secs(CLIENT_TIMEOUT) {
-                        warn!(user_id = %user_id_clone, "Client timeout, closing connection");
+                    // 超时轮询，仅当 use_timeout=true 时检查超时断开
+                    if use_timeout && last_activity.elapsed() > timeout_duration {
+                        warn!(user_id = %user_id_clone, "Client timeout ({}s), closing connection", client_timeout_secs);
                         break;
                     }
+                    // 否则继续等待（永不超时模式）
                 }
             }
         }

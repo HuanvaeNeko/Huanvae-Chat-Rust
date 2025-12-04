@@ -17,6 +17,7 @@ use crate::storage::handlers::friends_file_access::{
     generate_friend_file_presigned_url, generate_friend_file_extended_presigned_url,
 };
 use crate::storage::handlers::file_query::list_files_handler;
+use crate::websocket::NotificationService;
 
 /// 创建storage路由
 pub fn create_storage_routes(
@@ -24,12 +25,17 @@ pub fn create_storage_routes(
     s3_client: Arc<S3Client>,
     auth_state: AuthState,
     api_base_url: String,
+    notification_service: Option<NotificationService>,
 ) -> Router {
-    let storage_state = StorageState::new(db.clone(), s3_client.clone(), api_base_url);
+    let mut storage_state = StorageState::new(db.clone(), s3_client.clone(), api_base_url);
+    if let Some(ns) = notification_service {
+        storage_state = storage_state.with_notification(ns);
+    }
 
     // 上传相关路由
     let upload_router = Router::new()
         .route("/upload/request", post(request_upload))
+        .route("/upload/confirm", post(confirm_presigned_upload))
         .route("/multipart/part_url", get(get_multipart_part_url))
         .route_layer(middleware::from_fn_with_state(
             auth_state.clone(),

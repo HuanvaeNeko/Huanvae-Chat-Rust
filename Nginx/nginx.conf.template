@@ -29,8 +29,8 @@ http {
     keepalive_timeout 65;
     types_hash_max_size 2048;
 
-    # 文件上传大小限制
-    client_max_body_size 500M;
+    # 文件上传大小限制（0 = 不限制，由后端控制）
+    client_max_body_size 0;
     client_body_buffer_size 10M;
 
     # Gzip 压缩
@@ -103,10 +103,10 @@ http {
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";
 
-            # WebSocket 长连接超时设置
-            proxy_connect_timeout 7d;
-            proxy_send_timeout 7d;
-            proxy_read_timeout 7d;
+            # WebSocket 长连接超时设置（0 = 永不超时）
+            proxy_connect_timeout 0;
+            proxy_send_timeout 0;
+            proxy_read_timeout 0;
 
             # 禁用缓冲
             proxy_buffering off;
@@ -164,10 +164,25 @@ http {
         }
 
         # ============================================
-        # MinIO Bucket 代理（预签名URL访问）
+        # MinIO Bucket 代理（预签名URL访问 + PUT直传）
         # 匹配所有 bucket 路径: user-file, friends-file, group-file, avatars
         # ============================================
         location ~ ^/(user-file|friends-file|group-file|avatars)/ {
+            # CORS 预检请求处理（支持 PUT 上传）
+            if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' '${CORS_ALLOWED_ORIGINS}' always;
+                add_header 'Access-Control-Allow-Methods' 'GET, PUT, HEAD, OPTIONS' always;
+                add_header 'Access-Control-Allow-Headers' 'Content-Type, Content-Length, Authorization' always;
+                add_header 'Access-Control-Max-Age' 3600 always;
+                add_header 'Content-Type' 'text/plain charset=UTF-8';
+                add_header 'Content-Length' 0;
+                return 204;
+            }
+
+            # 正常请求的 CORS 响应头
+            add_header 'Access-Control-Allow-Origin' '${CORS_ALLOWED_ORIGINS}' always;
+            add_header 'Access-Control-Expose-Headers' 'ETag' always;
+
             proxy_pass http://minio_api;
             proxy_http_version 1.1;
             # Host 头与 MINIO_PRESIGN_ENDPOINT 中的 host 保持一致
@@ -177,15 +192,15 @@ http {
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_set_header Connection "";
 
-            # 大文件支持
+            # 大文件支持（无限制，支持5GB以内直传）
             proxy_buffering off;
             proxy_request_buffering off;
             client_max_body_size 0;
 
-            # 超时设置
-            proxy_connect_timeout 300s;
-            proxy_send_timeout 300s;
-            proxy_read_timeout 300s;
+            # 超时设置（大文件上传需要更长时间）
+            proxy_connect_timeout 600s;
+            proxy_send_timeout 600s;
+            proxy_read_timeout 600s;
 
             # 支持 Range 请求
             proxy_set_header Range $http_range;

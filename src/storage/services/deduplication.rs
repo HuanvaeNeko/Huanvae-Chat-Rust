@@ -1,5 +1,6 @@
 use sqlx::PgPool;
 use std::sync::Arc;
+use tracing::info;
 
 use crate::common::AppError;
 use crate::storage::client::S3Client;
@@ -29,8 +30,8 @@ impl DeduplicationService {
         file_hash: &str,
         user_id: &str,
         _file_type: &FileType,
-        _storage_location: &StorageLocation,
-        _related_id: Option<&str>,
+        storage_location: &StorageLocation,
+        related_id: Option<&str>,
         new_file_key: &str,
         file_size: i64,
         content_type: &str,
@@ -46,6 +47,38 @@ impl DeduplicationService {
                     .grant_permission(&mapping.uuid, user_id, "owner", "upload")
                     .await?;
 
+                // 群文件秒传：授予所有活跃群成员读取权限
+                if *storage_location == StorageLocation::GroupFiles {
+                    if let Some(group_id_str) = related_id {
+                        info!("群文件秒传，授权群 {} 所有成员访问", group_id_str);
+                        let members: Vec<(String,)> = sqlx::query_as(
+                            r#"SELECT "user-id" FROM "group-members" 
+                               WHERE "group-id" = $1::uuid AND "status" = 'active'"#
+                        )
+                        .bind(group_id_str)
+                        .fetch_all(&self.db)
+                        .await?;
+
+                        for (member_id,) in members {
+                            if member_id != user_id {
+                                self.uuid_mapping_service
+                                    .grant_permission(&mapping.uuid, &member_id, "read", "group_share")
+                                    .await?;
+                            }
+                        }
+                    }
+                }
+
+                // 好友文件秒传：授予好友读取权限
+                if *storage_location == StorageLocation::FriendMessages {
+                    if let Some(friend_id) = related_id {
+                        info!("好友文件秒传，授权好友 {} 访问", friend_id);
+                        self.uuid_mapping_service
+                            .grant_permission(&mapping.uuid, friend_id, "read", "friend_share")
+                            .await?;
+                    }
+                }
+
                 // 创建file-records记录
                 sqlx::query(
                     r#"INSERT INTO "file-records" 
@@ -58,8 +91,8 @@ impl DeduplicationService {
                 .bind(new_file_key)
                 .bind(user_id)
                 .bind(_file_type.to_string())
-                .bind(_storage_location.to_string())
-                .bind(_related_id)
+                .bind(storage_location.to_string())
+                .bind(related_id)
                 .bind(file_size)
                 .bind(content_type)
                 .bind(file_hash)

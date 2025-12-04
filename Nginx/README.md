@@ -51,10 +51,11 @@ Nginx/
 
 | 路径 | 目标服务 | 用途 |
 |------|---------|------|
+| `/ws` | backend:8080 | WebSocket 连接（永不超时） |
 | `/api/*` | backend:8080 | 后端 API 服务 |
-| `/user-file/*` | minio:9000 | 用户个人文件（预签名URL） |
-| `/friends-file/*` | minio:9000 | 好友聊天文件（预签名URL） |
-| `/group-file/*` | minio:9000 | 群聊文件（预签名URL） |
+| `/user-file/*` | minio:9000 | 用户个人文件（预签名URL + PUT直传） |
+| `/friends-file/*` | minio:9000 | 好友聊天文件（预签名URL + PUT直传） |
+| `/group-file/*` | minio:9000 | 群聊文件（预签名URL + PUT直传） |
 | `/avatars/*` | minio:9000 | 公开头像（直接访问） |
 | `/minio/*` | minio:9001 | MinIO 管理控制台（开发环境） |
 | `/health` | 本地 | Nginx 健康检查 |
@@ -93,17 +94,59 @@ location /api/ {
 }
 ```
 
-### MinIO 文件代理
+### MinIO 文件代理（支持 PUT 直传）
 
 ```nginx
 # 匹配所有 bucket 路径: user-file, friends-file, group-file, avatars
 location ~ ^/(user-file|friends-file|group-file|avatars)/ {
+    # CORS 预检请求处理（支持 PUT 直传）
+    if ($request_method = 'OPTIONS') {
+        add_header 'Access-Control-Allow-Origin' '${CORS_ALLOWED_ORIGINS}' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, PUT, HEAD, OPTIONS' always;
+        add_header 'Access-Control-Allow-Headers' 'Content-Type, Content-Length, Authorization' always;
+        add_header 'Access-Control-Max-Age' 3600 always;
+        return 204;
+    }
+    
+    # 正常请求的 CORS 响应头
+    add_header 'Access-Control-Allow-Origin' '${CORS_ALLOWED_ORIGINS}' always;
+    add_header 'Access-Control-Expose-Headers' 'ETag' always;
+    
     proxy_pass http://minio_api;
     proxy_http_version 1.1;
     # Host 头与 MINIO_PRESIGN_ENDPOINT 保持一致（用于签名验证）
     proxy_set_header Host "localhost";
-    proxy_buffering off;           # 大文件支持
-    client_max_body_size 0;        # 无大小限制
+    proxy_buffering off;           # 大文件支持（无内存缓冲）
+    proxy_request_buffering off;   # 流式上传
+    client_max_body_size 0;        # 无大小限制（支持5GB直传）
+    
+    # 超时设置（大文件上传）
+    proxy_connect_timeout 600s;
+    proxy_send_timeout 600s;
+    proxy_read_timeout 600s;
+}
+```
+
+**PUT 直传说明**：
+- 前端通过预签名URL直接 PUT 上传文件到 MinIO
+- 支持真实的上传进度条（浏览器直传，无后端中转）
+- 最大支持 5GB 单文件直传，更大文件使用分片上传
+
+### WebSocket 代理（永不超时）
+
+```nginx
+location = /ws {
+    proxy_pass http://backend;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    
+    # 永不超时（0 = 无限制）
+    proxy_connect_timeout 0;
+    proxy_send_timeout 0;
+    proxy_read_timeout 0;
+    
+    proxy_buffering off;
 }
 ```
 

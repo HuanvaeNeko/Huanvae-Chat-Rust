@@ -943,7 +943,7 @@ sleep 1
 
 # ==============================================
 
-log_step "第 33 步：请求文件上传（使用UUID映射机制）"
+log_step "第 33 步：请求文件上传（使用预签名PUT直传）"
 
 if [ -n "$HASH_CMD" ]; then
     log_info "请求上传URL（file_type: user_image, storage: user_files）..."
@@ -973,17 +973,25 @@ if [ -n "$HASH_CMD" ]; then
         log_info "UUID访问URL: $FILE1_UUID_URL"
         log_info "文件UUID: $FILE1_UUID"
         log_info "预览支持: $PREVIEW_SUPPORT"
-    elif [ "$UPLOAD_MODE" = "one_time_token" ]; then
-        log_success "✓ 获取一次性Token上传URL成功"
-        UPLOAD_URL=$(echo "$UPLOAD_REQ" | jq -r '.upload_url' 2>/dev/null)
+    elif [ "$UPLOAD_MODE" = "presigned_put" ]; then
+        log_success "✓ 获取预签名PUT上传URL成功"
+        PRESIGNED_UPLOAD_URL=$(echo "$UPLOAD_REQ" | jq -r '.presigned_url' 2>/dev/null)
         FILE1_KEY=$(echo "$UPLOAD_REQ" | jq -r '.file_key' 2>/dev/null)
         EXPIRES_IN=$(echo "$UPLOAD_REQ" | jq -r '.expires_in' 2>/dev/null)
         
-        log_info "上传模式: one_time_token"
-        log_info "上传URL: ${UPLOAD_URL:0:60}..."
+        log_info "上传模式: presigned_put（<5GB预签名直传）"
+        log_info "预签名URL: ${PRESIGNED_UPLOAD_URL:0:80}..."
         log_info "文件key: $FILE1_KEY"
         log_info "有效期: ${EXPIRES_IN}秒"
         log_info "预览支持: $PREVIEW_SUPPORT"
+    elif [ "$UPLOAD_MODE" = "presigned_multipart" ]; then
+        log_success "✓ 获取预签名分片上传URL成功"
+        FILE1_KEY=$(echo "$UPLOAD_REQ" | jq -r '.file_key' 2>/dev/null)
+        MULTIPART_ID=$(echo "$UPLOAD_REQ" | jq -r '.multipart_upload_id' 2>/dev/null)
+        
+        log_info "上传模式: presigned_multipart（>=5GB分片上传）"
+        log_info "文件key: $FILE1_KEY"
+        log_info "分片上传ID: $MULTIPART_ID"
     else
         log_error "✗ 获取上传URL失败"
     fi
@@ -995,24 +1003,38 @@ sleep 1
 
 # ==============================================
 
-log_step "第 34 步：直接上传文件到MinIO（使用一次性Token）"
+log_step "第 34 步：使用预签名URL直传文件到MinIO"
 
-if [ -n "$TEST_FILE_HASH" ] && [ -n "$UPLOAD_URL" ] && [ "$INSTANT_UPLOAD" != "true" ]; then
-    log_info "使用一次性Token上传文件..."
-    # 直接上传文件（multipart/form-data）
-    DIRECT_UPLOAD=$(curl -s -X POST "$UPLOAD_URL" \
-        -F "file=@$TEST_FILE")
-    echo "$DIRECT_UPLOAD" | jq '.' 2>/dev/null || echo "$DIRECT_UPLOAD"
+if [ -n "$TEST_FILE_HASH" ] && [ -n "$PRESIGNED_UPLOAD_URL" ] && [ "$INSTANT_UPLOAD" != "true" ]; then
+    log_info "使用预签名PUT直传文件到MinIO..."
+    # 使用PUT方法直接上传到MinIO
+    CONTENT_TYPE=$(file --mime-type -b "$TEST_FILE" 2>/dev/null || echo "application/octet-stream")
+    HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT "$PRESIGNED_UPLOAD_URL" \
+        -H "Content-Type: $CONTENT_TYPE" \
+        --data-binary "@$TEST_FILE")
     
-    if echo "$DIRECT_UPLOAD" | jq -e '.file_url' > /dev/null 2>&1; then
-        FILE1_UUID_URL=$(echo "$DIRECT_UPLOAD" | jq -r '.file_url')
-        FILE1_UUID=$(echo "$FILE1_UUID_URL" | grep -oP '(?<=/file/)[^/]+$')
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+        log_success "✓ 预签名PUT上传成功 (HTTP $HTTP_CODE)"
         
-        log_success "✓ 文件上传成功（已创建UUID映射）"
-        log_info "UUID访问URL: $FILE1_UUID_URL"
-        log_info "文件UUID: $FILE1_UUID"
+        # 确认上传完成
+        log_info "调用confirm接口确认上传..."
+        CONFIRM_RESULT=$(api_call POST /api/storage/upload/confirm "$USER1_TOKEN_NEW" "{
+            \"file_key\": \"$FILE1_KEY\"
+        }")
+        echo "$CONFIRM_RESULT" | jq '.' 2>/dev/null || echo "$CONFIRM_RESULT"
+        
+        if echo "$CONFIRM_RESULT" | jq -e '.file_url' > /dev/null 2>&1; then
+            FILE1_UUID_URL=$(echo "$CONFIRM_RESULT" | jq -r '.file_url')
+            FILE1_UUID=$(echo "$FILE1_UUID_URL" | grep -oP '(?<=/file/)[^/]+$')
+            
+            log_success "✓ 上传确认成功（已创建UUID映射）"
+            log_info "UUID访问URL: $FILE1_UUID_URL"
+            log_info "文件UUID: $FILE1_UUID"
+        else
+            log_error "✗ 上传确认失败"
+        fi
     else
-        log_error "✗ 文件上传失败"
+        log_error "✗ 预签名PUT上传失败 (HTTP $HTTP_CODE)"
     fi
 elif [ "$INSTANT_UPLOAD" = "true" ]; then
     log_info "已秒传，跳过实际上传步骤"
@@ -1078,11 +1100,13 @@ if [ -n "$HASH_CMD" ]; then
     }")
     
     INSTANT_UPLOAD3=$(echo "$FORCE_UPLOAD" | jq -r '.instant_upload' 2>/dev/null)
-    FORCE_UPLOAD_URL=$(echo "$FORCE_UPLOAD" | jq -r '.upload_url' 2>/dev/null)
+    FORCE_UPLOAD_PRESIGN_URL=$(echo "$FORCE_UPLOAD" | jq -r '.presigned_url' 2>/dev/null)
+    FORCE_UPLOAD_MODE=$(echo "$FORCE_UPLOAD" | jq -r '.mode' 2>/dev/null)
     
-    if [ "$INSTANT_UPLOAD3" = "false" ] && [ -n "$FORCE_UPLOAD_URL" ] && [ "$FORCE_UPLOAD_URL" != "null" ]; then
+    if [ "$INSTANT_UPLOAD3" = "false" ] && [ -n "$FORCE_UPLOAD_PRESIGN_URL" ] && [ "$FORCE_UPLOAD_PRESIGN_URL" != "null" ]; then
         log_success "✓ 强制上传功能正常工作（force_upload=true 跳过秒传）"
-        log_info "强制上传URL: ${FORCE_UPLOAD_URL:0:60}..."
+        log_info "上传模式: $FORCE_UPLOAD_MODE"
+        log_info "预签名URL: ${FORCE_UPLOAD_PRESIGN_URL:0:80}..."
     else
         log_error "✗ 强制上传未生效"
     fi
@@ -1283,28 +1307,43 @@ if [ -f "$LARGE_IMAGE" ]; then
     }")
     
     LARGE_INSTANT=$(echo "$LARGE_IMG_REQ" | jq -r '.instant_upload' 2>/dev/null)
-    LARGE_IMG_URL=$(echo "$LARGE_IMG_REQ" | jq -r '.upload_url' 2>/dev/null)
+    LARGE_PRESIGN_URL=$(echo "$LARGE_IMG_REQ" | jq -r '.presigned_url' 2>/dev/null)
     LARGE_UUID_URL=$(echo "$LARGE_IMG_REQ" | jq -r '.existing_file_url' 2>/dev/null)
+    LARGE_FILE_KEY=$(echo "$LARGE_IMG_REQ" | jq -r '.file_key' 2>/dev/null)
+    LARGE_UPLOAD_MODE=$(echo "$LARGE_IMG_REQ" | jq -r '.mode' 2>/dev/null)
     
     if [ "$LARGE_INSTANT" = "true" ]; then
         log_success "✓ 大文件秒传成功: $LARGE_UUID_URL"
         LARGE_UUID=$(echo "$LARGE_UUID_URL" | grep -oP '(?<=/file/)[^/]+$')
-    elif [ -n "$LARGE_IMG_URL" ] && [ "$LARGE_IMG_URL" != "null" ]; then
-        log_success "✓ 获取71MB大图片上传URL成功"
+    elif [ "$LARGE_UPLOAD_MODE" = "presigned_put" ] && [ -n "$LARGE_PRESIGN_URL" ] && [ "$LARGE_PRESIGN_URL" != "null" ]; then
+        log_success "✓ 获取71MB大图片预签名上传URL成功"
+        log_info "上传模式: presigned_put（<5GB）"
         
         # 上传文件
         log_info "正在上传71MB大图片（可能需要一些时间）..."
-        LARGE_IMG_UPLOAD=$(curl -s -X POST "$LARGE_IMG_URL" -F "file=@$LARGE_IMAGE")
+        HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT "$LARGE_PRESIGN_URL" \
+            -H "Content-Type: image/tiff" \
+            --data-binary "@$LARGE_IMAGE")
         
-        if echo "$LARGE_IMG_UPLOAD" | jq -e '.file_url' > /dev/null 2>&1; then
-            LARGE_UUID_URL=$(echo "$LARGE_IMG_UPLOAD" | jq -r '.file_url')
-            LARGE_UUID=$(echo "$LARGE_UUID_URL" | grep -oP '(?<=/file/)[^/]+$')
-            log_success "✓ 71MB大图片上传成功"
-            log_info "UUID访问URL: $LARGE_UUID_URL"
-            log_info "文件UUID: $LARGE_UUID"
+        if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+            log_success "✓ 预签名PUT上传成功 (HTTP $HTTP_CODE)"
+            
+            # 确认上传
+            LARGE_CONFIRM=$(api_call POST /api/storage/upload/confirm "$USER1_TOKEN_NEW" "{
+                \"file_key\": \"$LARGE_FILE_KEY\"
+            }")
+            
+            if echo "$LARGE_CONFIRM" | jq -e '.file_url' > /dev/null 2>&1; then
+                LARGE_UUID_URL=$(echo "$LARGE_CONFIRM" | jq -r '.file_url')
+                LARGE_UUID=$(echo "$LARGE_UUID_URL" | grep -oP '(?<=/file/)[^/]+$')
+                log_success "✓ 71MB大图片上传确认成功"
+                log_info "UUID访问URL: $LARGE_UUID_URL"
+                log_info "文件UUID: $LARGE_UUID"
+            else
+                log_error "✗ 大图片上传确认失败"
+            fi
         else
-            log_error "✗ 大图片上传失败"
-            echo "$LARGE_IMG_UPLOAD" | jq '.' 2>/dev/null || echo "$LARGE_IMG_UPLOAD"
+            log_error "✗ 大图片预签名PUT上传失败 (HTTP $HTTP_CODE)"
         fi
     else
         log_error "✗ 获取大图片上传URL失败"
@@ -1445,7 +1484,7 @@ log_step "第 49 步：好友文件上传请求（验证好友关系）"
 if [ -n "$HASH_CMD" ]; then
     log_info "用户1上传文件到好友聊天（friend_messages 存储位置）..."
     FRIEND_FILE_REQ=$(api_call POST /api/storage/upload/request "$USER1_TOKEN_NEW" "{
-        \"file_type\": \"user_image\",
+        \"file_type\": \"friend_image\",
         \"storage_location\": \"friend_messages\",
         \"related_id\": \"$USER2_ID\",
         \"filename\": \"friend_chat_image.jpg\",
@@ -1457,11 +1496,12 @@ if [ -n "$HASH_CMD" ]; then
     echo "$FRIEND_FILE_REQ" | jq '.' 2>/dev/null || echo "$FRIEND_FILE_REQ"
     
     FRIEND_FILE_MODE=$(echo "$FRIEND_FILE_REQ" | jq -r '.mode' 2>/dev/null)
-    FRIEND_FILE_URL=$(echo "$FRIEND_FILE_REQ" | jq -r '.upload_url' 2>/dev/null)
+    FRIEND_PRESIGNED_URL=$(echo "$FRIEND_FILE_REQ" | jq -r '.presigned_url' 2>/dev/null)
     FRIEND_FILE_KEY=$(echo "$FRIEND_FILE_REQ" | jq -r '.file_key' 2>/dev/null)
     
-    if [ "$FRIEND_FILE_MODE" = "one_time_token" ] && [ -n "$FRIEND_FILE_URL" ] && [ "$FRIEND_FILE_URL" != "null" ]; then
+    if [ "$FRIEND_FILE_MODE" = "presigned_put" ] && [ -n "$FRIEND_PRESIGNED_URL" ] && [ "$FRIEND_PRESIGNED_URL" != "null" ]; then
         log_success "✓ 好友文件上传请求成功（已验证好友关系）"
+        log_info "上传模式: presigned_put"
         log_info "文件key: $FRIEND_FILE_KEY"
         
         # 验证file_key格式是否为 conv-{user1}-{user2}/images/...
@@ -1482,38 +1522,52 @@ sleep 1
 
 # ==============================================
 
-log_step "第 50 步：上传好友文件到MinIO（验证自动消息功能）"
+log_step "第 50 步：上传好友文件到MinIO（预签名PUT直传+确认）"
 
-if [ -n "$FRIEND_FILE_URL" ] && [ "$FRIEND_FILE_URL" != "null" ]; then
-    log_info "上传好友文件（应自动发送消息）..."
-    FRIEND_FILE_UPLOAD=$(curl -s -X POST "$FRIEND_FILE_URL" \
-        -F "file=@$TEST_FILE")
-    echo "$FRIEND_FILE_UPLOAD" | jq '.' 2>/dev/null || echo "$FRIEND_FILE_UPLOAD"
+if [ -n "$FRIEND_PRESIGNED_URL" ] && [ "$FRIEND_PRESIGNED_URL" != "null" ]; then
+    log_info "使用预签名PUT直传好友文件到MinIO..."
+    CONTENT_TYPE=$(file --mime-type -b "$TEST_FILE" 2>/dev/null || echo "image/jpeg")
+    HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT "$FRIEND_PRESIGNED_URL" \
+        -H "Content-Type: $CONTENT_TYPE" \
+        --data-binary "@$TEST_FILE")
     
-    if echo "$FRIEND_FILE_UPLOAD" | jq -e '.file_url' > /dev/null 2>&1; then
-        FRIEND_FILE_UUID_URL=$(echo "$FRIEND_FILE_UPLOAD" | jq -r '.file_url')
-        FRIEND_FILE_UUID=$(echo "$FRIEND_FILE_UUID_URL" | grep -oP '(?<=/file/)[^/]+$')
-        AUTO_MSG_UUID=$(echo "$FRIEND_FILE_UPLOAD" | jq -r '.message_uuid' 2>/dev/null)
-        AUTO_MSG_TIME=$(echo "$FRIEND_FILE_UPLOAD" | jq -r '.message_send_time' 2>/dev/null)
+    if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+        log_success "✓ 好友文件预签名PUT上传成功 (HTTP $HTTP_CODE)"
         
-        log_success "✓ 好友文件上传成功"
-        log_info "UUID访问URL: $FRIEND_FILE_UUID_URL"
-        log_info "文件UUID: $FRIEND_FILE_UUID"
+        # 确认上传完成
+        log_info "调用confirm接口确认好友文件上传..."
+        FRIEND_CONFIRM=$(api_call POST /api/storage/upload/confirm "$USER1_TOKEN_NEW" "{
+            \"file_key\": \"$FRIEND_FILE_KEY\"
+        }")
+        echo "$FRIEND_CONFIRM" | jq '.' 2>/dev/null || echo "$FRIEND_CONFIRM"
         
-        # 验证自动消息功能
-        if [ "$AUTO_MSG_UUID" != "null" ] && [ -n "$AUTO_MSG_UUID" ]; then
-            log_success "✓ 自动消息发送成功（新功能验证）"
-            log_info "消息UUID: $AUTO_MSG_UUID"
-            log_info "发送时间: $AUTO_MSG_TIME"
-            FILE_MSG_UUID="$AUTO_MSG_UUID"
+        if echo "$FRIEND_CONFIRM" | jq -e '.file_url' > /dev/null 2>&1; then
+            FRIEND_FILE_UUID_URL=$(echo "$FRIEND_CONFIRM" | jq -r '.file_url')
+            FRIEND_FILE_UUID=$(echo "$FRIEND_FILE_UUID_URL" | grep -oP '(?<=/file/)[^/]+$')
+            AUTO_MSG_UUID=$(echo "$FRIEND_CONFIRM" | jq -r '.message_uuid' 2>/dev/null)
+            AUTO_MSG_TIME=$(echo "$FRIEND_CONFIRM" | jq -r '.message_send_time' 2>/dev/null)
+            
+            log_success "✓ 好友文件上传确认成功"
+            log_info "UUID访问URL: $FRIEND_FILE_UUID_URL"
+            log_info "文件UUID: $FRIEND_FILE_UUID"
+            
+            # 验证自动消息功能
+            if [ "$AUTO_MSG_UUID" != "null" ] && [ -n "$AUTO_MSG_UUID" ]; then
+                log_success "✓ 自动消息发送成功（新功能验证）"
+                log_info "消息UUID: $AUTO_MSG_UUID"
+                log_info "发送时间: $AUTO_MSG_TIME"
+                FILE_MSG_UUID="$AUTO_MSG_UUID"
+            else
+                log_error "✗ 自动消息功能未生效"
+            fi
         else
-            log_error "✗ 自动消息功能未生效"
+            log_error "✗ 好友文件上传确认失败"
         fi
     else
-        log_error "✗ 好友文件上传失败"
+        log_error "✗ 好友文件预签名PUT上传失败 (HTTP $HTTP_CODE)"
     fi
 else
-    log_info "跳过好友文件上传（无上传URL）"
+    log_info "跳过好友文件上传（无预签名URL）"
 fi
 
 sleep 1
@@ -2264,10 +2318,10 @@ echo -e "${GREEN}║  ✓ 消息查询         分页查询                     
 echo -e "${GREEN}║  ✓ 消息删除         软删除                                   ║${NC}"
 echo -e "${GREEN}║  ✓ 消息撤回         2分钟内                                  ║${NC}"
 echo -e "${GREEN}║  ✓ 权限验证         非好友拒绝                               ║${NC}"
-echo -e "${GREEN}║  ✓ 文件上传         SHA-256哈希验证                          ║${NC}"
+echo -e "${GREEN}║  ✓ 文件上传         预签名PUT直传MinIO + confirm确认          ║${NC}"
 echo -e "${GREEN}║  ✓ UUID映射         秒传机制（跨用户生效）                   ║${NC}"
 echo -e "${GREEN}║  ✓ 强制上传         跳过秒传（force_upload=true）            ║${NC}"
-echo -e "${GREEN}║  ✓ 预签名访问       通过Nginx代理访问MinIO                    ║${NC}"
+echo -e "${GREEN}║  ✓ 预签名直传       <5GB用PUT, >=5GB用分片上传              ║${NC}"
 echo -e "${GREEN}║  ✓ 预签名URL        3小时有效期（MinIO直连）                 ║${NC}"
 echo -e "${GREEN}║  ✓ 扩展URL          7天有效期（超大文件）                    ║${NC}"
 echo -e "${GREEN}║  ✓ Range请求        视频流式播放支持                         ║${NC}"

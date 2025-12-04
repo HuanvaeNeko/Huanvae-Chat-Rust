@@ -675,6 +675,12 @@ body {
   transform: scale(0.98);
 }
 
+.load-more-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  user-select: none;
+}
+
 .message-loading {
   display: flex;
   align-items: center;
@@ -1659,4 +1665,67 @@ h4 {
   .chat-panel.hidden {
     display: none;
   }
+}
+
+/* 上传进度条覆盖层 */
+.upload-progress-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(4px);
+}
+
+.upload-progress-modal {
+  background: var(--bg-white);
+  border-radius: 12px;
+  padding: 24px 32px;
+  min-width: 360px;
+  max-width: 90%;
+  box-shadow: var(--shadow-lg);
+}
+
+.upload-progress-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.upload-progress-filename {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+  word-break: break-all;
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-progress-bar {
+  height: 8px;
+  background: var(--bg-base);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.upload-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #667eea, #764ba2);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.upload-progress-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: center;
 }

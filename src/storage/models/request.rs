@@ -27,13 +27,20 @@ pub struct FileUploadRequest {
     pub force_upload: Option<bool>,
 }
 
-/// 上传完成通知
+/// 上传完成通知（旧版，保留兼容）
 #[derive(Debug, Deserialize)]
 pub struct UploadCompleteRequest {
     pub file_key: String,
     pub storage_location: StorageLocation,
     pub file_size: u64,
     pub etag: Option<String>,
+}
+
+/// 预签名上传确认请求
+#[derive(Debug, Deserialize)]
+pub struct ConfirmUploadRequest {
+    /// 文件key（request_upload返回的）
+    pub file_key: String,
 }
 
 /// 预签名下载URL请求

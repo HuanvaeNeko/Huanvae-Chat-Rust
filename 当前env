@@ -31,7 +31,7 @@ CHECK_CLEANUP_INTERVAL_SECONDS=60      # need-blacklist-check 清理间隔（秒
 
 WS_ENABLE_READ_RECEIPT=true        # 已读回执开关
 WS_HEARTBEAT_INTERVAL_SECONDS=30   # 心跳间隔
-WS_CLIENT_TIMEOUT_SECONDS=60       # 客户端超时
+WS_CLIENT_TIMEOUT_SECONDS=600      # 客户端超时
 
 # 服务器配置
 APP_HOST=0.0.0.0

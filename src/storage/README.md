@@ -55,7 +55,7 @@ MAX_CONCURRENT_UPLOADS=5              # 最大并发上传数
 | `avatars` | 用户头像 | 公开读取 | `{user_id}.{ext}` |
 | `user-file` | 用户个人文件 | 私有 | `{user_id}/{type}/{timestamp}_{hash}_{filename}` |
 | `friends-file` | 好友消息文件 | 私有 | `{conversation_uuid}/{type}/{timestamp}_{hash}_{filename}` |
-| `group-file` | 群聊文件 | 私有 | `{group_id}/{type}/{timestamp}_{hash}_{filename}` |
+| `group-file` | 群聊文件 | 私有 | `group-{group_id}/{type}/{timestamp}_{hash}_{filename}` |
 
 **type目录分类**：
 - `images/` - 图片文件
@@ -64,33 +64,44 @@ MAX_CONCURRENT_UPLOADS=5              # 最大并发上传数
 
 ## 🚀 核心功能
 
-### 1. 统一文件上传
+### 1. 统一文件上传（预签名直传MinIO）
 
 #### **上传策略**
 
 | 文件类型 | 大小范围 | 上传方式 | 预览支持 |
 |---------|---------|---------|---------|
-| 头像 | < 5MB | 一次性Token | 在线预览 |
-| 图片 | < 100MB | 一次性Token | 在线预览 |
-| 图片（大） | 100MB - 15GB | 一次性Token | 仅下载 |
-| 视频 | < 15GB | 一次性Token | 在线预览 |
-| 视频（大） | 15GB - 30GB | 一次性Token | 仅下载 |
-| 文档 | < 15GB | 一次性Token | 仅下载 |
-| 超大文件 | 15GB - 30GB | 预签名URL（分片） | 仅下载 |
+| 头像 | < 5MB | 预签名PUT直传 | 在线预览 |
+| 图片 | < 100MB | 预签名PUT直传 | 在线预览 |
+| 图片（大） | 100MB - 15GB | 预签名PUT直传 | 仅下载 |
+| 视频 | < 5GB | 预签名PUT直传 | 在线预览 |
+| 视频/文档（大） | 5GB - 30GB | 预签名分片上传 | 仅下载 |
+
+**分流规则**：
+- `< 5GB`：预签名PUT单次上传（PresignedPut）
+- `>= 5GB`：预签名分片上传（PresignedMultipart）
 
 #### **工作流程**
 
 ```
 1. 客户端计算文件采样SHA-256哈希
    - 小文件（< 30MB）：完整哈希
-   - 大文件（≥ 30MB）：采样哈希（元信息 + 开头/中间/结尾各10MB）
+   - 大文件（≥ 30MB）：采样哈希（元信息 + 文件大小）
+
 2. 请求上传 → POST /api/storage/upload/request
    ├─ 秒传检查（采样哈希去重）
-   ├─ 权限验证
+   ├─ 权限验证（好友关系/群成员）
    ├─ 文件类型和大小验证
-   └─ 生成上传凭证（Token或预签名URL）
-3. 客户端直连MinIO上传（使用Token或预签名URL）
-4. 上传完成通知（Token自动验证和消费）
+   └─ 返回预签名URL或分片上传ID
+
+3. 客户端直传MinIO
+   ├─ < 5GB：PUT 预签名URL直传（真实进度条）
+   └─ >= 5GB：分片上传（每片获取预签名URL）
+
+4. 确认上传 → POST /api/storage/upload/confirm
+   ├─ 验证文件已存在于MinIO
+   ├─ 创建UUID映射和权限
+   ├─ 自动发送消息（好友/群聊）
+   └─ 发送WebSocket实时通知
 ```
 
 ### 2. 秒传功能（UUID映射 + 权限表 + 采样哈希）
@@ -107,6 +118,8 @@ MAX_CONCURRENT_UPLOADS=5              # 最大并发上传数
   - 查询到已存在的UUID映射（采样哈希匹配）
   - 为当前用户创建独立的file_records记录
   - 授予当前用户访问权限
+  - **群文件秒传**：自动授予所有活跃群成员读取权限
+  - **好友文件秒传**：自动授予好友读取权限
   - 返回相同的UUID访问URL
   - **无需重复上传物理文件**
 
@@ -134,15 +147,22 @@ MAX_CONCURRENT_UPLOADS=5              # 最大并发上传数
 新格式（UUID）  : http://localhost:8080/api/storage/file/{uuid}
 ```
 
-### 3. 一次性Token上传（< 15GB）
+**物理文件路径与Bucket映射**：
+```
+conv-{user1}-{user2}/...  → friends-file bucket
+group-{group_uuid}/...    → group-file bucket
+{user_id}/...             → user-file bucket
+```
+
+### 3. 预签名PUT直传（< 5GB）
 
 ```javascript
-// 前端示例
+// 前端示例：预签名PUT直传MinIO
 const uploadFile = async (file) => {
   // 1. 计算采样哈希
   const fileHash = await calculateSamplingHashSHA256(file);
   
-  // 2. 请求上传
+  // 2. 请求上传凭证
   const response = await fetch('/api/storage/upload/request', {
     method: 'POST',
     headers: {
@@ -150,8 +170,9 @@ const uploadFile = async (file) => {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      file_type: 'user_image',
-      storage_location: 'user_files',
+      file_type: 'friend_image',
+      storage_location: 'friend_messages',
+      related_id: 'friend_user_id',
       filename: file.name,
       file_size: file.size,
       content_type: file.type,
@@ -160,7 +181,7 @@ const uploadFile = async (file) => {
     }),
   });
   
-  const { upload_url, instant_upload, existing_file_url } = await response.json();
+  const { presigned_url, file_key, instant_upload, existing_file_url } = await response.json();
   
   // 3. 检查秒传
   if (instant_upload) {
@@ -168,20 +189,29 @@ const uploadFile = async (file) => {
     return existing_file_url;
   }
   
-  // 4. 上传文件
-  const formData = new FormData();
-  formData.append('file', file);
-  
-  const uploadResponse = await fetch(upload_url, {
-    method: 'POST',
-    body: formData,
+  // 4. PUT 直传 MinIO（通过Nginx代理）
+  const minioUrl = presigned_url.replace('http://localhost:9000', ''); // 转为相对URL
+  await fetch(minioUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': file.type },
+    body: file,
   });
   
-  return await uploadResponse.json();
+  // 5. 确认上传
+  const confirmResponse = await fetch('/api/storage/upload/confirm', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ file_key }),
+  });
+  
+  return await confirmResponse.json();
 };
 ```
 
-### 4. 预签名URL分片上传（> 15GB）
+### 4. 预签名分片上传（>= 5GB）
 
 ```javascript
 // 超大文件分片上传示例
@@ -190,7 +220,7 @@ const uploadLargeFile = async (file) => {
   const { multipart_upload_id, file_key } = await requestUpload(file);
   
   // 2. 分片上传
-  const chunkSize = 50 * 1024 * 1024; // 50MB
+  const chunkSize = 100 * 1024 * 1024; // 100MB
   const chunks = Math.ceil(file.size / chunkSize);
   
   for (let i = 0; i < chunks; i++) {
@@ -200,7 +230,7 @@ const uploadLargeFile = async (file) => {
     
     // 获取分片URL
     const { part_url } = await fetch(
-      `/api/storage/multipart/part-url?file_key=${file_key}&upload_id=${multipart_upload_id}&part_number=${i + 1}`,
+      `/api/storage/multipart/part_url?file_key=${file_key}&upload_id=${multipart_upload_id}&part_number=${i + 1}`,
       { headers: { 'Authorization': `Bearer ${accessToken}` } }
     ).then(r => r.json());
     
@@ -210,6 +240,16 @@ const uploadLargeFile = async (file) => {
       body: chunk,
     });
   }
+  
+  // 3. 确认上传
+  await fetch('/api/storage/upload/confirm', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ file_key }),
+  });
 };
 ```
 
@@ -236,15 +276,14 @@ const uploadLargeFile = async (file) => {
 
 **说明**：
 - `file_hash`: 采样SHA-256哈希（小文件完整哈希，大文件采样哈希）
-- `estimated_upload_time`: 仅超大文件（> 15GB）需要提供
+- `estimated_upload_time`: 仅超大文件（>= 5GB）需要提供
 
-**Response (首次上传):**
+**Response (首次上传 - 预签名PUT直传):**
 ```json
 {
-  "mode": "one_time_token",
+  "mode": "presigned_put",
   "preview_support": "inline_preview",
-  "upload_token": "token_xxx",
-  "upload_url": "http://localhost:8080/api/storage/upload/direct?token=xxx",
+  "presigned_url": "http://localhost:9000/user-file/xxx?X-Amz-Algorithm=...",
   "expires_in": 900,
   "file_key": "user_id/images/timestamp_hash_filename.jpg",
   "max_file_size": 104857600,
@@ -253,13 +292,26 @@ const uploadLargeFile = async (file) => {
 }
 ```
 
+**Response (首次上传 - 分片上传，>= 5GB):**
+```json
+{
+  "mode": "presigned_multipart",
+  "preview_support": "download_only",
+  "multipart_upload_id": "upload_id_xxx",
+  "expires_in": 7200,
+  "file_key": "user_id/videos/timestamp_hash_largefile.mp4",
+  "max_file_size": 32212254720,
+  "instant_upload": false,
+  "existing_file_url": null
+}
+```
+
 **Response (秒传 - 个人文件):**
 ```json
 {
-  "mode": "one_time_token",
+  "mode": "presigned_put",
   "preview_support": "inline_preview",
-  "upload_token": null,
-  "upload_url": null,
+  "presigned_url": null,
   "expires_in": null,
   "file_key": "user_id/images/timestamp_hash_filename.jpg",
   "max_file_size": 0,
@@ -268,13 +320,12 @@ const uploadLargeFile = async (file) => {
 }
 ```
 
-**Response (秒传 - 好友文件，自动发送消息):**
+**Response (秒传 - 好友/群文件，自动发送消息):**
 ```json
 {
-  "mode": "one_time_token",
+  "mode": "presigned_put",
   "preview_support": "inline_preview",
-  "upload_token": null,
-  "upload_url": null,
+  "presigned_url": null,
   "expires_in": null,
   "file_key": "conv-user1-user2/images/timestamp_hash_filename.jpg",
   "max_file_size": 0,
@@ -285,19 +336,29 @@ const uploadLargeFile = async (file) => {
 }
 ```
 
-**好友文件秒传说明**：
-- 当 `storage_location` 为 `friend_messages` 且触发秒传时，自动在聊天记录中插入文件消息
+**好友/群文件秒传说明**：
+- 当 `storage_location` 为 `friend_messages` 或 `group_files` 且触发秒传时，自动在聊天记录中插入文件消息
 - 消息内容格式：`[图片] 文件名`、`[视频] 文件名`、`[文件] 文件名`
 - 返回的 `message_uuid` 和 `message_send_time` 可用于前端更新聊天界面
+- 自动发送 WebSocket 实时通知
 
-### POST /api/storage/upload/direct?token={token}
+### POST /api/storage/upload/confirm
 
-直接上传文件（Token验证，无需access_token）
+确认预签名上传完成（需鉴权）
 
-**Request:** multipart/form-data
-- `file`: 文件数据
+**Request Body:**
+```json
+{
+  "file_key": "user_id/images/timestamp_hash_filename.jpg"
+}
+```
 
-**Response (个人文件):**
+**功能说明**：
+1. 验证文件已成功上传到 MinIO
+2. 创建 UUID 映射和权限记录
+3. 好友/群文件：自动发送消息并推送 WebSocket 通知
+
+**Response:**
 ```json
 {
   "file_url": "http://localhost:8080/api/storage/file/{uuid}",

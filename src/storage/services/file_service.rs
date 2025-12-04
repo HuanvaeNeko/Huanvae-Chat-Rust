@@ -87,7 +87,7 @@ impl FileService {
             {
                 info!("秒传成功(UUID映射): 用户 {} 复用文件 {}", user_id, existing.file_key);
                 return Ok(FileUploadResponse {
-                    mode: UploadMode::OneTimeToken,
+                    mode: UploadMode::PresignedPut,  // 秒传使用预签名模式标识
                     preview_support,
                     upload_token: None,
                     upload_url: None,
@@ -107,18 +107,18 @@ impl FileService {
         // 6. 判断上传模式
         let upload_mode = FileValidator::determine_upload_mode(request.file_size);
 
-        // 7. 根据模式生成上传凭证
+        // 7. 根据模式生成上传凭证（全部预签名直传MinIO）
         let response = match upload_mode {
-            UploadMode::OneTimeToken => {
-                self.generate_one_time_token_upload(
+            UploadMode::PresignedPut => {
+                self.generate_presigned_put_upload(
                     user_id,
                     &file_key,
                     &request,
                     preview_support,
                 ).await?
             }
-            UploadMode::PresignedUrl => {
-                self.generate_presigned_url_upload(
+            UploadMode::PresignedMultipart => {
+                self.generate_presigned_multipart_upload(
                     user_id,
                     &file_key,
                     &request,
@@ -130,8 +130,8 @@ impl FileService {
         Ok(response)
     }
 
-    /// 生成一次性Token上传（< 15GB）
-    async fn generate_one_time_token_upload(
+    /// 生成预签名PUT上传URL（< 5GB，直传MinIO）
+    async fn generate_presigned_put_upload(
         &self,
         user_id: &str,
         file_key: &str,
@@ -139,22 +139,18 @@ impl FileService {
         preview_support: PreviewSupport,
     ) -> Result<FileUploadResponse, AppError> {
         let file_hash = request.file_hash.as_deref().unwrap_or("no_hash");
-        
-        // 生成一次性Token
-        let upload_token = Self::generate_upload_token(file_key, user_id, file_hash);
+        let bucket = request.storage_location.to_bucket_name();
         
         // 计算有效期
         let expires_in = FileValidator::calculate_expires_in(request.file_size, request.estimated_upload_time);
         
-        // 生成上传URL
-        let upload_url = format!(
-            "{}/api/storage/upload/direct?token={}",
-            self.api_base_url,
-            upload_token
-        );
+        // 生成预签名PUT URL（直传MinIO）
+        let presigned_url = self.s3_client
+            .generate_presigned_upload_url(bucket, file_key, &request.content_type, expires_in)
+            .await?;
 
-        // 创建数据库记录
-        self.create_pending_file_record(
+        // 创建数据库记录（状态为 pending_confirm）
+        self.create_pending_confirm_record(
             file_key,
             user_id,
             &request.file_type,
@@ -163,18 +159,17 @@ impl FileService {
             request.file_size,
             &request.content_type,
             file_hash,
-            &upload_token,
             expires_in,
             &preview_support,
         ).await?;
 
         Ok(FileUploadResponse {
-            mode: UploadMode::OneTimeToken,
+            mode: UploadMode::PresignedPut,
             preview_support,
-            upload_token: Some(upload_token),
-            upload_url: Some(upload_url),
+            upload_token: None,
+            upload_url: None,
             expires_in: Some(expires_in),
-            presigned_url: None,
+            presigned_url: Some(presigned_url),
             multipart_upload_id: None,
             file_key: file_key.to_string(),
             max_file_size: FileValidator::get_max_file_size(&request.file_type),
@@ -185,8 +180,8 @@ impl FileService {
         })
     }
 
-    /// 生成预签名URL上传（> 15GB）
-    async fn generate_presigned_url_upload(
+    /// 生成预签名分片上传（>= 5GB）
+    async fn generate_presigned_multipart_upload(
         &self,
         user_id: &str,
         file_key: &str,
@@ -205,8 +200,8 @@ impl FileService {
             .initiate_multipart_upload(bucket, file_key, &request.content_type)
             .await?;
 
-        // 创建数据库记录
-        self.create_pending_file_record(
+        // 创建数据库记录（状态为 pending_confirm）
+        self.create_pending_confirm_record(
             file_key,
             user_id,
             &request.file_type,
@@ -215,7 +210,6 @@ impl FileService {
             request.file_size,
             &request.content_type,
             file_hash,
-            "",
             expires_in,
             &preview_support,
         ).await?;
@@ -230,7 +224,7 @@ impl FileService {
         .await?;
 
         Ok(FileUploadResponse {
-            mode: UploadMode::PresignedUrl,
+            mode: UploadMode::PresignedMultipart,
             preview_support,
             upload_token: None,
             upload_url: None,
@@ -291,7 +285,7 @@ impl FileService {
                     conversation_uuid, type_dir, timestamp, hash_prefix, sanitized_name)
             }
             StorageLocation::GroupFiles => {
-                // group-file/{group_id}/{type}/{timestamp}_{hash}_{filename}.ext
+                // group-file/group-{group_id}/{type}/{timestamp}_{hash}_{filename}.ext
                 let group_id = related_id.unwrap_or("unknown");
                 let type_dir = match file_type {
                     FileType::GroupImage => "images",
@@ -299,26 +293,14 @@ impl FileService {
                     FileType::GroupDocument => "files",
                     _ => "files",
                 };
-                format!("{}/{}/{}_{}_{}",
+                format!("group-{}/{}/{}_{}_{}",
                     group_id, type_dir, timestamp, hash_prefix, sanitized_name)
             }
         }
     }
 
-    /// 生成一次性上传Token
-    fn generate_upload_token(file_key: &str, user_id: &str, file_hash: &str) -> String {
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
-        hasher.update(file_key.as_bytes());
-        hasher.update(user_id.as_bytes());
-        hasher.update(file_hash.as_bytes());
-        hasher.update(Utc::now().timestamp().to_string().as_bytes());
-        hasher.update(uuid::Uuid::new_v4().as_bytes());
-        format!("{:x}", hasher.finalize())
-    }
-
-    /// 创建待确认的文件记录
-    async fn create_pending_file_record(
+    /// 创建待确认的文件记录（预签名上传专用，状态为 pending_confirm）
+    async fn create_pending_confirm_record(
         &self,
         file_key: &str,
         owner_id: &str,
@@ -328,7 +310,6 @@ impl FileService {
         file_size: u64,
         content_type: &str,
         file_hash: &str,
-        upload_token: &str,
         expires_in: u32,
         preview_support: &PreviewSupport,
     ) -> Result<(), AppError> {
@@ -337,9 +318,9 @@ impl FileService {
         sqlx::query(
             r#"INSERT INTO "file-records" 
             ("file-key", "owner-id", "file-type", "storage-location", "related-id",
-             "file-size", "content-type", "file-hash", "upload-token", "status",
+             "file-size", "content-type", "file-hash", "status",
              "created-at", "expires-at", "preview-support")
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', NOW(), $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending_confirm', NOW(), $9, $10)
             ON CONFLICT ("file-key") DO NOTHING"#
         )
         .bind(file_key)
@@ -350,13 +331,120 @@ impl FileService {
         .bind(file_size as i64)
         .bind(content_type)
         .bind(file_hash)
-        .bind(upload_token)
         .bind(expires_at)
         .bind(preview_support.to_string())
         .execute(&self.db)
         .await?;
 
         Ok(())
+    }
+    
+    /// 验证并完成预签名上传（确认文件已上传到MinIO）
+    pub async fn verify_and_complete_presigned_upload(
+        &self,
+        file_key: &str,
+        user_id: &str,
+    ) -> Result<FileRecord, AppError> {
+        // 1. 查询待确认的文件记录
+        let record = sqlx::query_as::<_, FileRecord>(
+            r#"SELECT * FROM "file-records"
+            WHERE "file-key" = $1
+              AND "owner-id" = $2
+              AND "status" = 'pending_confirm'
+              AND "expires-at" > NOW()"#
+        )
+        .bind(file_key)
+        .bind(user_id)
+        .fetch_optional(&self.db)
+        .await?
+        .ok_or_else(|| AppError::BadRequest("文件记录不存在或已过期".to_string()))?;
+
+        // 2. 验证MinIO中文件确实存在
+        let storage_loc: StorageLocation = record.storage_location.parse()
+            .map_err(|e: String| AppError::BadRequest(e))?;
+        let bucket = self.get_bucket_name(&storage_loc);
+        
+        if !self.s3_client.file_exists(bucket, file_key).await? {
+            return Err(AppError::BadRequest("文件未上传到存储服务".to_string()));
+        }
+
+        Ok(record)
+    }
+
+    /// 完成预签名上传（创建UUID映射、权限授予）
+    pub async fn complete_presigned_upload(
+        &self,
+        file_key: &str,
+        owner_id: &str,
+        file_size: i64,
+        content_type: &str,
+        preview_support: &str,
+        storage_location: &str,
+        related_id: Option<&str>,
+        file_hash: &str,
+    ) -> Result<String, AppError> {
+        // 创建UUID映射
+        let file_uuid = self.uuid_mapping_service
+            .create_mapping(file_key, file_hash, file_size, content_type, preview_support, owner_id)
+            .await?;
+        
+        // 授予上传者权限
+        self.uuid_mapping_service
+            .grant_permission(&file_uuid, owner_id, "owner", "upload")
+            .await?;
+        
+        // 好友文件：同时授权好友访问
+        if storage_location == "friend_messages" {
+            if let Some(friend_id) = related_id {
+                info!("好友文件上传完成，授权好友 {} 访问", friend_id);
+                self.uuid_mapping_service
+                    .grant_permission(&file_uuid, friend_id, "read", "friend_share")
+                    .await?;
+            }
+        }
+
+        // 群文件：授予所有活跃群成员读取权限
+        if storage_location == "group_files" {
+            if let Some(group_id_str) = related_id {
+                info!("群文件上传完成，授权群 {} 所有成员访问", group_id_str);
+                let members: Vec<(String,)> = sqlx::query_as(
+                    r#"SELECT "user-id" FROM "group-members" 
+                       WHERE "group-id" = $1::uuid AND "status" = 'active'"#
+                )
+                .bind(&group_id_str)
+                .fetch_all(&self.db)
+                .await?;
+
+                for (member_id,) in members {
+                    if member_id != owner_id {
+                        self.uuid_mapping_service
+                            .grant_permission(&file_uuid, &member_id, "read", "group_share")
+                            .await?;
+                    }
+                }
+            }
+        }
+        
+        // 生成UUID访问URL
+        let uuid_file_url = format!("{}/api/storage/file/{}", self.api_base_url, file_uuid);
+        
+        // 更新file-records
+        sqlx::query(
+            r#"UPDATE "file-records" 
+            SET "status" = 'completed',
+                "file-url" = $2,
+                "file-uuid" = $3,
+                "completed-at" = NOW()
+            WHERE "file-key" = $1
+              AND "status" = 'pending_confirm'"#
+        )
+        .bind(file_key)
+        .bind(&uuid_file_url)
+        .bind(&file_uuid)
+        .execute(&self.db)
+        .await?;
+
+        Ok(uuid_file_url)
     }
 
     /// 验证并获取上传Token信息
@@ -567,21 +655,17 @@ impl FileService {
         // physical_file_key格式:
         //   - 个人文件: {user_id}/{type}/{timestamp}_{hash}_{filename}
         //   - 好友文件: conv-{user1}-{user2}/{type}/{timestamp}_{hash}_{filename}
-        //   - 群文件: {group_uuid}/{type}/{timestamp}_{hash}_{filename}
+        //   - 群文件: group-{group_uuid}/{type}/{timestamp}_{hash}_{filename}
         let physical_file_key = &mapping.physical_file_key;
         let bucket = if physical_file_key.starts_with("conv-") {
             // 好友消息文件
             "friends-file"
+        } else if physical_file_key.starts_with("group-") {
+            // 群文件
+            "group-file"
         } else {
-            // 检查第一段是否为UUID格式（群文件）
-            let first_segment = physical_file_key.split('/').next().unwrap_or("");
-            if uuid::Uuid::parse_str(first_segment).is_ok() {
-                // 群文件
-                "group-file"
-            } else {
-                // 个人文件
-                "user-file"
-            }
+            // 个人文件
+            "user-file"
         };
 
         // 4. 生成预签名下载URL

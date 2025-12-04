@@ -5,12 +5,14 @@ use crate::storage::models::{FileType, PreviewSupport, UploadMode};
 pub struct FileValidator;
 
 impl FileValidator {
-    /// 判断上传模式
+    /// 判断上传模式（统一使用预签名直传MinIO）
     pub fn determine_upload_mode(file_size: u64) -> UploadMode {
-        if file_size <= 15 * 1024 * 1024 * 1024 {  // 15GB
-            UploadMode::OneTimeToken
+        const MULTIPART_THRESHOLD: u64 = 5 * 1024 * 1024 * 1024; // 5GB
+        
+        if file_size < MULTIPART_THRESHOLD {
+            UploadMode::PresignedPut        // < 5GB: 单次PUT预签名直传
         } else {
-            UploadMode::PresignedUrl
+            UploadMode::PresignedMultipart  // >= 5GB: 分片预签名上传
         }
     }
 

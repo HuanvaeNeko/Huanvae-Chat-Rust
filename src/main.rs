@@ -224,6 +224,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 app_state.s3_client.clone(),
                 app_state.auth_state(),
                 api_base_url,
+                Some(app_state.notification_service.clone()),
             ),
         )
         // 群聊路由

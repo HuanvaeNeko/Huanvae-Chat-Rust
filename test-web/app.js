@@ -122,28 +122,34 @@ function formatSize(bytes) {
   return (bytes / 1024 / 1024 / 1024).toFixed(1) + ' GB';
 }
 
-// 计算文件 SHA-256 哈希
+// 计算文件 SHA-256 哈希（仅基于文件内容，不包含元数据，确保相同内容产生相同哈希）
 async function calculateSHA256(file) {
-  const SAMPLE_SIZE = 10 * 1024 * 1024;
-  const metadata = `${file.name}|${file.size}|${file.lastModified}|${file.type}`;
-  const metadataBuffer = new TextEncoder().encode(metadata);
+  const SAMPLE_SIZE = 10 * 1024 * 1024; // 10MB
   
   let dataToHash;
   
   if (file.size <= SAMPLE_SIZE * 3) {
+    // 小文件：完整读取内容计算哈希
     dataToHash = await file.arrayBuffer();
   } else {
+    // 大文件：采样计算（头部 + 中部 + 尾部 + 文件大小）
+    // 文件大小作为额外信息确保不同大小的文件产生不同哈希
+    const sizeBuffer = new TextEncoder().encode(`|size:${file.size}|`);
+    
     const chunks = [];
+    // 头部 10MB
     chunks.push(new Uint8Array(await file.slice(0, SAMPLE_SIZE).arrayBuffer()));
+    // 中部 10MB
     const middleStart = Math.floor((file.size - SAMPLE_SIZE) / 2);
     chunks.push(new Uint8Array(await file.slice(middleStart, middleStart + SAMPLE_SIZE).arrayBuffer()));
+    // 尾部 10MB
     chunks.push(new Uint8Array(await file.slice(file.size - SAMPLE_SIZE, file.size).arrayBuffer()));
     
-    const totalLength = metadataBuffer.length + chunks.reduce((sum, c) => sum + c.length, 0);
+    const totalLength = sizeBuffer.length + chunks.reduce((sum, c) => sum + c.length, 0);
     dataToHash = new Uint8Array(totalLength);
     let offset = 0;
-    dataToHash.set(metadataBuffer, offset);
-    offset += metadataBuffer.length;
+    dataToHash.set(sizeBuffer, offset);
+    offset += sizeBuffer.length;
     for (const chunk of chunks) {
       dataToHash.set(chunk, offset);
       offset += chunk.length;
@@ -394,9 +400,13 @@ function handleWsNewMessage(msg) {
   if (state.currentChat && 
       state.currentChat.type === source_type && 
       state.currentChat.id === source_id) {
+    // 记录收到新消息时用户是否在底部附近
+    const wasNearBottom = isNearBottom();
+    
     // 只更新最后消息预览，不增加未读数
     updateConversationUnread(source_type, source_id, 0, preview, timestamp);
-    loadMessages();
+    // 加载消息，根据用户是否在底部决定是否滚动
+    loadMessages(wasNearBottom);
     wsSendMarkRead(source_type, source_id);
   } else {
     // 不在当前会话，增加未读数
@@ -1678,7 +1688,8 @@ function closeChat() {
 }
 
 // 加载消息（使用时间戳分页优化）
-async function loadMessages() {
+// scrollToEnd: 是否滚动到底部，默认 true（首次加载），收到新消息时根据用户位置决定
+async function loadMessages(scrollToEnd = true) {
   if (!state.currentChat) return;
   
   const { type, id } = state.currentChat;
@@ -1700,7 +1711,10 @@ async function loadMessages() {
       state.hasMore[chatKey] = result.data?.has_more || false;
     }
     
-    renderMessages(state.messages[chatKey]);
+    renderMessages(state.messages[chatKey], { scrollToEnd });
+    
+    // 初始化滚动监听（用于自动加载更多历史消息）
+    initMessageContainerScrollListener();
   } catch (err) {
     console.error('加载消息失败:', err);
     container.innerHTML = '<div class="empty-state"><p>加载消息失败</p></div>';
@@ -1717,8 +1731,13 @@ async function loadMoreMessages() {
   
   // 检查是否还有更多消息
   if (!state.hasMore?.[chatKey] || messages.length === 0) {
-    showToast('没有更多历史消息了', 'info');
     return;
+  }
+  
+  // 显示加载提示
+  const hintEl = document.querySelector('.load-more-hint');
+  if (hintEl) {
+    hintEl.textContent = '⏳ 正在加载...';
   }
   
   // 获取最老消息的时间戳（ISO 8601 格式）
@@ -1777,14 +1796,14 @@ function renderMessages(messages, options = {}) {
   // 翻转消息顺序：后端返回最新在前，前端需要最新在后（底部）
   const sortedMessages = [...messages].reverse();
   
-  // 检查是否有更多历史消息（"加载更多"按钮）
+  // 顶部加载提示（滚动到顶部自动加载更多，无需手动点击）
   const chatKey = state.currentChat ? `${state.currentChat.type}-${state.currentChat.id}` : '';
   const hasMore = state.hasMore?.[chatKey];
-  const loadMoreBtn = hasMore 
-    ? `<div class="load-more-container"><button class="load-more-btn" onclick="loadMoreMessages()">⬆️ 加载更多历史消息</button></div>` 
+  const loadMoreHint = hasMore 
+    ? `<div class="load-more-container"><span class="load-more-hint">⬆️ 滚动到顶部加载更多历史消息</span></div>` 
     : '';
   
-  container.innerHTML = loadMoreBtn + sortedMessages.map(msg => {
+  container.innerHTML = loadMoreHint + sortedMessages.map(msg => {
     const isSelf = msg.sender_id === myId;
     const hasFile = msg.file_uuid && msg.file_uuid !== 'null';
     
@@ -1831,11 +1850,29 @@ function renderMessages(messages, options = {}) {
       }
     }
     
+    // 获取发送者显示名称（群聊优先使用 sender_nickname，fallback 到 sender_id）
+    let senderDisplayName = msg.sender_id;
+    if (state.currentChat?.type === 'group') {
+      // 优先使用后端 JOIN 返回的 sender_nickname
+      if (msg.sender_nickname) {
+        senderDisplayName = msg.sender_nickname;
+      } else {
+        // fallback: 从群成员列表查找群内昵称或用户昵称
+        const members = state.groupMembers[state.currentChat.id] || [];
+        const member = members.find(m => m.user_id === msg.sender_id);
+        if (member?.group_nickname) {
+          senderDisplayName = member.group_nickname;
+        } else if (member?.user_nickname) {
+          senderDisplayName = member.user_nickname;
+        }
+      }
+    }
+    
     return `
       <div class="message ${isSelf ? 'self' : ''}">
         <div class="message-avatar">${avatarHtml}</div>
         <div class="message-body">
-          ${!isSelf && state.currentChat?.type === 'group' ? `<div class="message-sender">${msg.sender_id}</div>` : ''}
+          ${!isSelf && state.currentChat?.type === 'group' ? `<div class="message-sender">${escapeHtml(senderDisplayName)}</div>` : ''}
           <div class="message-bubble">${contentHtml}</div>
           <div class="message-time">${formatTime(msg.send_time)}</div>
         </div>
@@ -1874,6 +1911,50 @@ function scrollToBottom() {
   setTimeout(() => {
     msgContainer.scrollTop = msgContainer.scrollHeight;
   }, 200);
+}
+
+// 检查用户是否在消息列表底部附近（100px 阈值）
+function isNearBottom() {
+  const msgContainer = document.getElementById('messageContainer');
+  if (!msgContainer) return true;
+  
+  const threshold = 100; // 距离底部 100px 以内算"在底部"
+  return (msgContainer.scrollHeight - msgContainer.scrollTop - msgContainer.clientHeight) < threshold;
+}
+
+// 检查用户是否在消息列表顶部附近（触发加载更多）
+function isNearTop() {
+  const msgContainer = document.getElementById('messageContainer');
+  if (!msgContainer) return false;
+  
+  const threshold = 50; // 距离顶部 50px 以内触发加载
+  return msgContainer.scrollTop < threshold;
+}
+
+// 消息容器滚动事件处理（滚动到顶部自动加载更多）
+let isLoadingMore = false;
+function handleMessageContainerScroll() {
+  if (isLoadingMore) return;
+  if (!state.currentChat) return;
+  
+  const chatKey = `${state.currentChat.type}-${state.currentChat.id}`;
+  
+  // 检查是否接近顶部且还有更多消息
+  if (isNearTop() && state.hasMore?.[chatKey]) {
+    isLoadingMore = true;
+    loadMoreMessages().finally(() => {
+      isLoadingMore = false;
+    });
+  }
+}
+
+// 初始化消息容器滚动监听
+function initMessageContainerScrollListener() {
+  const msgContainer = document.getElementById('messageContainer');
+  if (msgContainer) {
+    msgContainer.removeEventListener('scroll', handleMessageContainerScroll);
+    msgContainer.addEventListener('scroll', handleMessageContainerScroll);
+  }
 }
 
 function escapeHtml(text) {
@@ -2045,25 +2126,40 @@ async function sendMessage() {
   }
 }
 
-// 发送文件消息
+// 发送文件消息（预签名直传MinIO，真实进度条）
 async function sendFileMessage(files) {
   if (!files || !files[0] || !state.currentChat) return;
   
   const file = files[0];
   const { type, id } = state.currentChat;
   
+  // 创建进度条 UI
+  const progressOverlay = createUploadProgressOverlay(file.name);
+  document.body.appendChild(progressOverlay);
+  const updateProgress = (percent, text) => {
+    progressOverlay.querySelector('.upload-progress-fill').style.width = percent + '%';
+    progressOverlay.querySelector('.upload-progress-text').textContent = text;
+  };
+  
   try {
-    showToast('正在上传...', 'info');
-    
     // 计算哈希
+    updateProgress(5, '计算文件哈希...');
     const file_hash = await calculateSHA256(file);
     
-    // 确定文件类型
-    let file_type = 'user_document';
-    if (file.type.startsWith('image/')) file_type = 'user_image';
-    else if (file.type.startsWith('video/')) file_type = 'user_video';
+    // 根据聊天类型确定文件类型
+    let file_type;
+    if (type === 'friend') {
+      if (file.type.startsWith('image/')) file_type = 'friend_image';
+      else if (file.type.startsWith('video/')) file_type = 'friend_video';
+      else file_type = 'friend_document';
+    } else {
+      if (file.type.startsWith('image/')) file_type = 'group_image';
+      else if (file.type.startsWith('video/')) file_type = 'group_video';
+      else file_type = 'group_document';
+    }
     
-    // 请求上传
+    // 请求上传凭证
+    updateProgress(10, '请求上传凭证...');
     const uploadInfo = await api('/api/storage/upload/request', {
       method: 'POST',
       body: {
@@ -2078,31 +2174,143 @@ async function sendFileMessage(files) {
       }
     });
     
+    // 秒传检查
     if (uploadInfo.instant_upload) {
+      updateProgress(100, '秒传成功！');
       showToast('发送成功（秒传）', 'success');
+      setTimeout(() => progressOverlay.remove(), 1000);
+      await new Promise(r => setTimeout(r, 300));
       loadMessages();
       return;
     }
     
-    // 上传文件
-    const formData = new FormData();
-    formData.append('file', file);
+    // 预签名直传 MinIO
+    if (uploadInfo.presigned_url) {
+      // 将预签名URL转换为通过Nginx代理的URL
+      let presignedUrl = uploadInfo.presigned_url;
+      try {
+        const url = new URL(presignedUrl);
+        presignedUrl = BASE_URL + url.pathname + url.search;
+      } catch (e) {}
+      
+      // PUT 直传 MinIO（真实进度）
+      updateProgress(15, '开始上传...');
+      await uploadToMinioWithProgress(presignedUrl, file, (percent) => {
+        const realPercent = 15 + percent * 0.75; // 15% - 90%
+        updateProgress(realPercent, `上传中 ${Math.round(percent)}%`);
+      });
+      
+      // 确认上传
+      updateProgress(92, '确认上传...');
+      const confirmResult = await api('/api/storage/upload/confirm', {
+        method: 'POST',
+        body: { file_key: uploadInfo.file_key }
+      });
+      
+      updateProgress(100, '发送成功！');
+      console.log('上传确认响应:', confirmResult);
+      showToast('发送成功', 'success');
+      
+      setTimeout(() => progressOverlay.remove(), 1500);
+      await new Promise(r => setTimeout(r, 300));
+      loadMessages();
+      return;
+    }
     
-    const uploadResult = await fetch(uploadInfo.upload_url, {
-      method: 'POST',
-      body: formData
-    });
+    // 分片上传（>= 5GB）
+    if (uploadInfo.multipart_upload_id) {
+      throw new Error('超大文件分片上传暂未实现前端界面');
+    }
     
-    if (!uploadResult.ok) throw new Error('上传失败');
+    throw new Error('不支持的上传模式');
     
-    showToast('发送成功', 'success');
-    loadMessages();
   } catch (err) {
-    showToast(err.message, 'error');
+    console.error('文件上传错误:', err);
+    updateProgress(0, '上传失败: ' + (err.message || '未知错误'));
+    progressOverlay.querySelector('.upload-progress-fill').style.background = '#e74c3c';
+    showToast(err.message || '上传失败', 'error');
+    setTimeout(() => progressOverlay.remove(), 3000);
   }
   
-  // 清空文件输入
   document.getElementById('chatFileInput').value = '';
+}
+
+// PUT 直传 MinIO（带进度）
+function uploadToMinioWithProgress(url, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable) {
+        const percent = (e.loaded / e.total) * 100;
+        onProgress(percent);
+      }
+    });
+    
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        reject(new Error(`上传失败: HTTP ${xhr.status}`));
+      }
+    });
+    
+    xhr.addEventListener('error', () => reject(new Error('网络错误')));
+    xhr.addEventListener('abort', () => reject(new Error('上传取消')));
+    
+    xhr.open('PUT', url);
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.send(file);
+  });
+}
+
+// 创建上传进度条覆盖层
+function createUploadProgressOverlay(filename) {
+  const overlay = document.createElement('div');
+  overlay.className = 'upload-progress-overlay';
+  overlay.innerHTML = `
+    <div class="upload-progress-modal">
+      <div class="upload-progress-title">上传文件</div>
+      <div class="upload-progress-filename">${filename}</div>
+      <div class="upload-progress-bar">
+        <div class="upload-progress-fill" style="width: 0%"></div>
+      </div>
+      <div class="upload-progress-text">准备中...</div>
+    </div>
+  `;
+  return overlay;
+}
+
+// 带进度的上传函数
+function uploadWithProgress(url, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable) {
+        const percent = (e.loaded / e.total) * 100;
+        onProgress(percent);
+      }
+    });
+    
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch {
+          resolve({});
+        }
+      } else {
+        reject(new Error(xhr.responseText || '上传失败'));
+      }
+    });
+    
+    xhr.addEventListener('error', () => reject(new Error('网络错误')));
+    xhr.addEventListener('abort', () => reject(new Error('上传取消')));
+    
+    xhr.open('POST', url);
+    xhr.send(formData);
+  });
 }
 
 // 输入框处理
@@ -2461,26 +2669,39 @@ async function uploadFileToServer(file) {
   
   progressContainer.style.display = 'block';
   progressFill.style.width = '0%';
+  progressFill.style.background = 'linear-gradient(90deg, #667eea, #764ba2)';
   
   try {
     // 1. 计算哈希
     progressText.textContent = '计算文件哈希...';
-    progressFill.style.width = '10%';
+    progressFill.style.width = '5%';
     
     const file_hash = await calculateSHA256(file);
     
     // 2. 确定参数
-    let file_type = 'user_document';
-    if (file.type.startsWith('image/')) file_type = 'user_image';
-    else if (file.type.startsWith('video/')) file_type = 'user_video';
-    
     const storage_location = document.getElementById('uploadLocation').value;
     const related_id = document.getElementById('uploadRelatedId')?.value;
     const force_upload = document.getElementById('forceUpload').checked;
     
+    // 根据 storage_location 确定 file_type
+    let file_type;
+    if (storage_location === 'friend_messages') {
+      if (file.type.startsWith('image/')) file_type = 'friend_image';
+      else if (file.type.startsWith('video/')) file_type = 'friend_video';
+      else file_type = 'friend_document';
+    } else if (storage_location === 'group_files') {
+      if (file.type.startsWith('image/')) file_type = 'group_image';
+      else if (file.type.startsWith('video/')) file_type = 'group_video';
+      else file_type = 'group_document';
+    } else {
+      if (file.type.startsWith('image/')) file_type = 'user_image';
+      else if (file.type.startsWith('video/')) file_type = 'user_video';
+      else file_type = 'user_document';
+    }
+    
     // 3. 请求上传
-    progressText.textContent = '请求上传...';
-    progressFill.style.width = '20%';
+    progressText.textContent = '请求上传凭证...';
+    progressFill.style.width = '10%';
     
     const body = {
       file_type,
@@ -2507,19 +2728,27 @@ async function uploadFileToServer(file) {
       return;
     }
     
-    // 5. 上传文件
-    progressText.textContent = '上传中...';
-    progressFill.style.width = '50%';
+    // 5. 使用 XMLHttpRequest 上传（带真实进度）
+    progressText.textContent = '上传中 0%';
+    progressFill.style.width = '15%';
+    
+    // 修正 upload_url 通过 Nginx 代理
+    let uploadUrl = uploadInfo.upload_url;
+    if (uploadUrl) {
+      try {
+        const url = new URL(uploadUrl);
+        uploadUrl = BASE_URL + url.pathname + url.search;
+      } catch (e) {}
+    }
     
     const formData = new FormData();
     formData.append('file', file);
     
-    const uploadResult = await fetch(uploadInfo.upload_url, {
-      method: 'POST',
-      body: formData
+    await uploadWithProgress(uploadUrl, formData, (percent) => {
+      const realPercent = 15 + percent * 0.8; // 15% - 95%
+      progressFill.style.width = realPercent + '%';
+      progressText.textContent = `上传中 ${Math.round(percent)}%`;
     });
-    
-    if (!uploadResult.ok) throw new Error('上传失败');
     
     progressFill.style.width = '100%';
     progressText.textContent = '上传成功！';
@@ -2527,7 +2756,8 @@ async function uploadFileToServer(file) {
     loadMyFiles();
     
   } catch (err) {
-    progressFill.style.width = '0%';
+    progressFill.style.width = '100%';
+    progressFill.style.background = '#e74c3c';
     progressText.textContent = '上传失败: ' + err.message;
     showToast(err.message, 'error');
   }

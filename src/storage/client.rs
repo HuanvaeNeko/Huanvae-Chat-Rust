@@ -224,6 +224,7 @@ impl S3Client {
     }
 
     /// 生成预签名上传URL（PUT方法）
+    /// 使用 presign_client 生成，签名基于 MINIO_PRESIGN_ENDPOINT 计算（通过 Nginx 代理）
     pub async fn generate_presigned_upload_url(
         &self,
         bucket: &str,
@@ -236,7 +237,8 @@ impl S3Client {
             .build()
             .map_err(|e| AppError::Storage(format!("Failed to build presigning config: {}", e)))?;
 
-        let presigned = self.client
+        // 使用 presign_client 生成预签名URL，签名基于 presign_endpoint 计算
+        let presigned = self.presign_client
             .put_object()
             .bucket(bucket)
             .key(key)

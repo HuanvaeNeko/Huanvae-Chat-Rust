@@ -76,8 +76,8 @@ impl StorageLocation {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum UploadMode {
-    OneTimeToken,     // 一次性Token（< 15GB）
-    PresignedUrl,     // 预签名URL（> 15GB）
+    PresignedPut,        // 预签名PUT上传（< 5GB，直传MinIO）
+    PresignedMultipart,  // 预签名分片上传（>= 5GB）
 }
 
 /// 预览支持枚举

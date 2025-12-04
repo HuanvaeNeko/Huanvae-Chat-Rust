@@ -5,7 +5,45 @@
 ## 📁 文件列表
 
 - `avatar.rs` - 头像上传服务
+- `file_service.rs` - 统一文件上传服务
+- `deduplication.rs` - 去重/秒传服务
+- `uuid_mapping.rs` - UUID映射服务
+- `validator.rs` - 文件验证服务
 - `mod.rs` - 模块导出
+
+## 🚀 DeduplicationService（秒传核心）
+
+### 功能
+
+检查文件哈希是否已存在，实现秒传功能。
+
+### 核心方法
+
+#### `check_and_create_uuid_reference()`
+
+```rust
+pub async fn check_and_create_uuid_reference(
+    &self,
+    file_hash: &str,
+    user_id: &str,
+    file_type: &FileType,
+    storage_location: &StorageLocation,
+    related_id: Option<&str>,
+    new_file_key: &str,
+    file_size: i64,
+    content_type: &str,
+    preview_support: &PreviewSupport,
+) -> Result<Option<ExistingFileInfo>, AppError>
+```
+
+**流程**：
+1. 查询 `file-uuid-mapping` 表是否存在相同哈希
+2. 验证 MinIO 中物理文件是否存在
+3. 授予当前用户访问权限
+4. **群文件秒传**：自动授予所有活跃群成员读取权限
+5. **好友文件秒传**：自动授予好友读取权限
+6. 创建 `file-records` 记录
+7. 返回已存在文件信息（秒传成功）或 `None`（需要实际上传）
 
 ## 🖼️ AvatarService
 
@@ -129,36 +167,21 @@ println!("Avatar URL: {}", url);
 
 ## 🔮 未来扩展
 
-### GroupFileService（待实现）
+### GroupFileService（已集成到 FileService）
 
-群聊文件上传服务，支持文档、视频、图片等。
-
-**建议实现**：
-
-```rust
-impl GroupFileService {
-    /// 上传群文件
-    pub async fn upload_group_file(
-        s3_client: &S3Client,
-        group_id: &str,
-        user_id: &str,
-        file_type: FileType,  // files/videos/images
-        data: Vec<u8>,
-        filename: &str,
-    ) -> Result<String, anyhow::Error>
-    
-    /// 验证文件类型和大小
-    pub fn validate_file(file_type: FileType, data: &[u8], filename: &str) 
-        -> Result<(), String>
-}
-```
+群聊文件上传已集成到统一的 `FileService`，通过 `storage_location: group_files` 区分。
 
 **存储路径**：
 ```
-group-files/{group_id}/files/{filename}
-group-files/{group_id}/videos/{filename}
-group-files/{group_id}/images/{filename}
+group-file/group-{group_id}/files/{timestamp}_{hash}_{filename}
+group-file/group-{group_id}/videos/{timestamp}_{hash}_{filename}
+group-file/group-{group_id}/images/{timestamp}_{hash}_{filename}
 ```
+
+**权限机制**：
+- 上传者自动获得 `owner` 权限
+- 所有活跃群成员自动获得 `read` 权限
+- 秒传时同样会授予群成员权限
 
 ### UserFileService（待实现）
 
