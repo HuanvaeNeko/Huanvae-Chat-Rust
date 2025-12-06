@@ -19,8 +19,11 @@
 │   └── 群聊管理.md              # 群聊创建、成员管理、角色管理、邀请码、公告
 ├── group_messages/
 │   └── 群消息.md                # 群聊消息发送、获取、删除、撤回
-└── storage/
-    └── 文件存储管理.md          # 文件上传、下载、预签名URL
+├── storage/
+│   └── 文件存储管理.md          # 文件上传、下载、预签名URL
+└── webrtc/
+    ├── ICE服务器配置.md         # TURN/STUN 服务器配置
+    └── WebRTC房间.md            # WebRTC 房间创建、加入、信令
 ```
 
 ## 🔗 快速导航
@@ -79,6 +82,15 @@
   - 确认上传完成（confirm）
   - UUID 访问 / 预签名 URL
   - 好友文件访问
+
+### WebRTC
+- [ICE 服务器配置](./webrtc/ICE服务器配置.md)
+  - 获取 TURN/STUN 服务器列表
+  - 动态凭证（有效期 10 分钟）
+- [WebRTC 房间](./webrtc/WebRTC房间.md)
+  - 创建房间（需登录）
+  - 加入房间（无需登录）
+  - 信令 WebSocket
 
 ## 🔧 通用配置
 
@@ -263,6 +275,14 @@ async function refreshToken() {
 | GET | `/api/storage/files` | 获取文件列表 |
 | POST | `/api/storage/friends-file/{uuid}/presigned-url` | 好友文件预签名 URL |
 
+### WebRTC
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/api/webrtc/ice-servers` | 获取 ICE 服务器配置（TURN/STUN） |
+| POST | `/api/webrtc/rooms` | 创建房间（需登录） |
+| POST | `/api/webrtc/rooms/{room_id}/join` | 加入房间（无需登录） |
+| WS | `/ws/webrtc/rooms/{room_id}?token=xxx` | 信令 WebSocket |
+
 ## ⚠️ 注意事项
 
 1. **HTTPS**：生产环境必须使用 HTTPS
@@ -278,6 +298,15 @@ async function refreshToken() {
 9. **文件上传**：使用预签名URL直传MinIO，上传后**必须调用confirm接口**确认
 
 ## 📝 更新日志
+
+- **2025-12-06**：
+  - 新增 WebRTC 房间功能
+    - 创建房间（需登录）
+    - 加入房间（无需登录，密码验证）
+    - 信令 WebSocket（SDP/ICE Candidate 转发）
+  - 新增 WebRTC ICE 服务器配置接口
+  - 支持分布式 TURN 服务器
+  - 动态凭证签发（TURN REST API）
 
 - **2025-12-04**：
   - 消息查询接口新增 `before_time` 时间戳分页参数（性能优化）

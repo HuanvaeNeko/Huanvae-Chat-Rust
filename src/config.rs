@@ -367,6 +367,64 @@ impl WebSocketConfig {
     }
 }
 
+/// TURN 服务配置
+#[derive(Clone, Debug)]
+pub struct TurnConfig {
+    /// 是否启用 TURN 服务
+    pub enabled: bool,
+    /// TURN 域名（realm）
+    pub realm: String,
+    /// 临时凭证有效期（秒），默认 600 (10分钟)
+    pub credential_ttl_secs: u64,
+    /// 密钥轮换间隔（小时），默认 24
+    pub secret_rotation_hours: u64,
+    /// 节点心跳超时（秒），默认 30
+    pub heartbeat_timeout_secs: u64,
+    /// Agent 认证令牌
+    pub agent_auth_token: String,
+}
+
+impl Default for TurnConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            realm: "turn.huanvae.com".to_string(),
+            credential_ttl_secs: 600,
+            secret_rotation_hours: 24,
+            heartbeat_timeout_secs: 30,
+            agent_auth_token: String::new(),
+        }
+    }
+}
+
+impl TurnConfig {
+    /// 从环境变量加载配置
+    pub fn from_env() -> Self {
+        Self {
+            enabled: env::var("TURN_ENABLED")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(false),
+            realm: env::var("TURN_REALM")
+                .unwrap_or_else(|_| "turn.huanvae.com".to_string()),
+            credential_ttl_secs: env::var("TURN_CREDENTIAL_TTL_SECONDS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(600),
+            secret_rotation_hours: env::var("TURN_SECRET_ROTATION_HOURS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(24),
+            heartbeat_timeout_secs: env::var("TURN_HEARTBEAT_TIMEOUT_SECONDS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(30),
+            agent_auth_token: env::var("TURN_AGENT_AUTH_TOKEN")
+                .unwrap_or_default(),
+        }
+    }
+}
+
 impl Default for CleanupConfig {
     fn default() -> Self {
         Self {
@@ -420,6 +478,8 @@ pub struct AppConfig {
     pub minio: MinioConfig,
     /// WebSocket 配置
     pub websocket: WebSocketConfig,
+    /// TURN 服务配置
+    pub turn: TurnConfig,
 }
 
 impl Default for AppConfig {
@@ -435,6 +495,7 @@ impl Default for AppConfig {
             cleanup: CleanupConfig::default(),
             minio: MinioConfig::default(),
             websocket: WebSocketConfig::default(),
+            turn: TurnConfig::default(),
         }
     }
 }
@@ -454,6 +515,7 @@ impl AppConfig {
             cleanup: CleanupConfig::from_env(),
             minio: MinioConfig::from_env().unwrap_or_default(),
             websocket: WebSocketConfig::from_env(),
+            turn: TurnConfig::from_env(),
         }
     }
 }
@@ -509,6 +571,11 @@ pub fn cleanup_config() -> &'static CleanupConfig {
 /// 获取 WebSocket 配置
 pub fn websocket_config() -> &'static WebSocketConfig {
     &get_config().websocket
+}
+
+/// 获取 TURN 配置
+pub fn turn_config() -> &'static TurnConfig {
+    &get_config().turn
 }
 
 #[cfg(test)]

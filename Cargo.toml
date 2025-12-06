@@ -49,3 +49,8 @@ aws-credential-types = "1.2.10"
 # WebSocket 和并发
 futures-util = "0.3.31"       # 异步流处理工具
 dashmap = "6.1.0"             # 高性能并发 HashMap (ConnectionManager)
+
+# TURN 凭证服务
+hmac = "0.12.1"               # HMAC 消息认证码
+sha1 = "0.10.6"               # SHA-1 哈希（TURN REST API 要求）
+base64 = "0.22.1"             # Base64 编码

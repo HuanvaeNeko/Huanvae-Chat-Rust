@@ -1,0 +1,25 @@
+# 环境配置（包含敏感信息）
+.env
+
+# Rust 构建产物
+/target/
+Cargo.lock
+
+# 数据目录
+/data/
+
+# 日志
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Docker
+*.tar
+

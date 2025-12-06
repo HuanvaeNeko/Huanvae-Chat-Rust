@@ -151,7 +151,58 @@ WebSocket 实时消息推送、未读消息通知、已读同步功能。
 
 ---
 
-### 8. common/ - 公共模块
+### 8. turn/ - TURN 协调模块
+分布式 TURN 服务器管理，提供 WebRTC ICE 配置服务。
+
+**详细文档**：[turn/README.md](./turn/README.md)
+
+**主要功能**：
+- TURN 节点注册与管理
+- 负载均衡节点选择
+- 动态凭证签发（TURN REST API）
+- 密钥自动轮换
+- 实时心跳监控
+
+**API 端点**：
+- `GET /api/webrtc/ice-servers` - 获取 ICE 服务器配置（需认证）
+- `WS /internal/turn-coordinator` - Agent WebSocket 连接（内部）
+
+**环境变量**：
+- `TURN_ENABLED` - 是否启用 TURN 功能（默认 false）
+- `TURN_REALM` - TURN 域名
+- `TURN_AGENT_AUTH_TOKEN` - Agent 认证令牌
+- `TURN_CREDENTIAL_TTL_SECONDS` - 凭证有效期（默认 600 秒）
+- `TURN_SECRET_ROTATION_HOURS` - 密钥轮换间隔（默认 24 小时）
+
+---
+
+### 9. webrtc_room/ - WebRTC 房间模块
+WebRTC 实时音视频通信的房间管理和信令服务。
+
+**详细文档**：[webrtc_room/README.md](./webrtc_room/README.md)
+
+**主要功能**：
+- 房间创建（登录用户）
+- 房间加入（无需登录，密码验证）
+- 信令 WebSocket（SDP/ICE Candidate 转发）
+- TURN 服务器自动分配
+- 临时凭证动态生成
+
+**API 端点**：
+- `POST /api/webrtc/rooms` - 创建房间（需登录）
+- `POST /api/webrtc/rooms/{room_id}/join` - 加入房间（无需登录）
+- `WS /ws/webrtc/rooms/{room_id}?token=xxx` - 信令 WebSocket
+
+**使用流程**：
+1. 登录用户创建房间，获得 `room_id` 和 `password`
+2. 分享房间号和密码给朋友
+3. 参与者使用房间号+密码加入，获得 `ws_token` 和 `ice_servers`
+4. 所有人连接信令 WebSocket，交换 SDP 和 ICE Candidate
+5. 建立 P2P 连接，开始音视频通话
+
+---
+
+### 10. common/ - 公共模块
 统一错误类型和 API 响应格式，供所有模块使用。
 
 **主要功能**：
@@ -171,7 +222,7 @@ pub async fn handler() -> Result<Json<ApiResponse<Data>>, AppError> {
 
 ---
 
-### 9. config.rs - 配置管理模块
+### 11. config.rs - 配置管理模块
 从环境变量加载所有配置项，将硬编码的时间常量等提取为可配置参数。
 
 **主要配置项**：
@@ -191,7 +242,7 @@ pub async fn handler() -> Result<Json<ApiResponse<Data>>, AppError> {
 
 ---
 
-### 10. app_state.rs - 应用状态管理
+### 12. app_state.rs - 应用状态管理
 统一管理所有服务实例，避免在 main.rs 中创建大量分散的 State 对象。
 
 **主要功能**：
@@ -294,7 +345,9 @@ main.rs
   ├─ friends_messages → 好友消息（依赖 auth middleware）
   ├─ groups     → 群聊系统（依赖 auth middleware）
   ├─ group_messages → 群消息（依赖 auth middleware + groups）
-  └─ websocket  → WebSocket 实时通信（依赖 auth + friends_messages + group_messages）
+  ├─ websocket  → WebSocket 实时通信（依赖 auth + friends_messages + group_messages）
+  ├─ turn       → TURN 协调服务（依赖 auth middleware）
+  └─ webrtc_room → WebRTC 房间服务（依赖 auth middleware + turn）
 ```
 
 **依赖说明**：
@@ -321,6 +374,8 @@ main.rs
 - [groups/README.md](./groups/README.md) - 群聊系统
 - [group_messages/README.md](./group_messages/README.md) - 群消息
 - [websocket/README.md](./websocket/README.md) - WebSocket 实时通信
+- [turn/README.md](./turn/README.md) - TURN 协调服务
+- [webrtc_room/README.md](./webrtc_room/README.md) - WebRTC 房间服务
 - [common/README.md](./common/README.md) - 公共模块
 
 ### 子模块文档

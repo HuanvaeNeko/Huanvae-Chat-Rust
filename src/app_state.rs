@@ -8,12 +8,18 @@ use crate::auth::{
     services::{BlacklistService, DeviceService, TokenService},
     utils::KeyManager,
 };
+use crate::config::turn_config;
 use crate::friends::handlers::FriendsState;
 use crate::friends_messages::handlers::MessagesState;
 use crate::groups::handlers::GroupsState;
 use crate::group_messages::handlers::GroupMessagesState;
 use crate::profile::handlers::routes::ProfileAppState;
 use crate::storage::S3Client;
+use crate::turn::{
+    handlers::TurnState,
+    services::{CredentialService, LoadBalancer, NodeRegistry, SecretManager},
+};
+use crate::webrtc_room::{RoomManager, RoomTokenService, WebRTCState};
 use crate::websocket::{
     handlers::WsState,
     services::{ConnectionManager, NotificationService, UnreadService},
@@ -49,6 +55,21 @@ pub struct AppState {
 
     /// WebSocket 通知服务
     pub notification_service: NotificationService,
+
+    /// TURN 节点注册中心
+    pub turn_node_registry: Arc<NodeRegistry>,
+
+    /// TURN 密钥管理器
+    pub turn_secret_manager: Arc<SecretManager>,
+
+    /// TURN 凭证服务
+    pub turn_credential_service: Arc<CredentialService>,
+
+    /// WebRTC 房间管理器
+    pub room_manager: Arc<RoomManager>,
+
+    /// WebRTC 房间 Token 服务
+    pub room_token_service: Arc<RoomTokenService>,
 }
 
 impl AppState {
@@ -74,6 +95,31 @@ impl AppState {
         let notification_service =
             NotificationService::new(db.clone(), connection_manager.clone());
 
+        // TURN 相关服务
+        let turn_cfg = turn_config();
+        let turn_node_registry = Arc::new(NodeRegistry::new(turn_cfg.heartbeat_timeout_secs));
+        let turn_secret_manager = Arc::new(SecretManager::new(turn_cfg.secret_rotation_hours));
+        let turn_credential_service = Arc::new(CredentialService::new(
+            turn_secret_manager.clone(),
+            turn_cfg.credential_ttl_secs,
+            turn_cfg.realm.clone(),
+        ));
+
+        // 如果启用 TURN，启动密钥轮换任务
+        if turn_cfg.enabled {
+            turn_secret_manager
+                .clone()
+                .start_rotation_task(turn_node_registry.clone());
+        }
+
+        // WebRTC 房间相关服务
+        let room_manager = Arc::new(RoomManager::new());
+        // 房间 Token 使用 TURN 的 agent_auth_token 作为密钥，有效期 10 分钟
+        let room_token_service = Arc::new(RoomTokenService::new(
+            turn_cfg.agent_auth_token.clone(),
+            600,
+        ));
+
         Self {
             db,
             token_service,
@@ -83,6 +129,11 @@ impl AppState {
             api_base_url,
             connection_manager,
             notification_service,
+            turn_node_registry,
+            turn_secret_manager,
+            turn_credential_service,
+            room_manager,
+            room_token_service,
         }
     }
 
@@ -186,6 +237,32 @@ impl AppState {
     /// 获取连接管理器（供其他模块使用）
     pub fn connection_manager(&self) -> &Arc<ConnectionManager> {
         &self.connection_manager
+    }
+
+    /// 获取 TURN 模块状态
+    pub fn turn_state(&self) -> TurnState {
+        let turn_cfg = turn_config();
+        TurnState::new(
+            self.turn_node_registry.clone(),
+            self.turn_secret_manager.clone(),
+            self.turn_credential_service.clone(),
+            turn_cfg.agent_auth_token.clone(),
+            turn_cfg.enabled,
+        )
+    }
+
+    /// 获取 WebRTC 房间模块状态
+    pub fn webrtc_state(&self) -> WebRTCState {
+        let turn_cfg = turn_config();
+        let load_balancer = Arc::new(LoadBalancer::new(self.turn_node_registry.clone()));
+
+        WebRTCState::new(
+            self.room_manager.clone(),
+            self.room_token_service.clone(),
+            load_balancer,
+            self.turn_credential_service.clone(),
+            turn_cfg.enabled,
+        )
     }
 }
 

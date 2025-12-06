@@ -10,6 +10,8 @@ pub mod groups;
 pub mod group_messages;
 pub mod profile;
 pub mod storage;
+pub mod turn;
+pub mod webrtc_room;
 pub mod websocket;
 
 // 重导出公共类型，方便外部使用

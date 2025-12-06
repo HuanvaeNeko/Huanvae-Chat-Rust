@@ -1,0 +1,52 @@
+# Turn Agent + Coturn 服务编排
+# 使用方法: docker compose up -d
+
+services:
+  # ============================================
+  # Turn Agent - 连接主服务器并管理 Coturn 配置
+  # ============================================
+  turn-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: turn-agent
+    # 使用 host 网络模式，方便访问宿主机服务
+    network_mode: host
+    env_file:
+      - .env
+    environment:
+      - RUST_LOG=${LOG_LEVEL:-info}
+    volumes:
+      # 配置目录（agent 生成配置，coturn 读取）
+      - ./data/config:/etc/turnserver:rw
+      # 日志目录
+      - ./data/logs:/var/log/turnserver:rw
+      # 模板目录
+      - ./config:/app/templates:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/health-check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ============================================
+  # Coturn TURN 服务器
+  # ============================================
+  coturn:
+    image: coturn/coturn:latest
+    container_name: coturn
+    # TURN 需要 host 网络模式以支持 UDP 中继
+    network_mode: host
+    volumes:
+      # 从 agent 接收配置
+      - ./data/config:/etc/turnserver:ro
+      # 日志
+      - ./data/logs:/var/log/turnserver:rw
+    command: ["-c", "/etc/turnserver/turnserver.conf", "--no-cli"]
+    restart: unless-stopped
+    # 等待配置文件生成后再启动
+    depends_on:
+      turn-agent:
+        condition: service_healthy

@@ -45,6 +45,12 @@
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
           </svg>
         </button>
+        <button class="nav-btn" data-panel="webrtc" onclick="switchPanel('webrtc')" title="视频通话">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="23 7 16 12 23 17 23 7"/>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+          </svg>
+        </button>
       </nav>
       
       <div class="sidebar-footer">
@@ -170,6 +176,52 @@
               <div class="progress-fill" id="uploadProgressFill"></div>
             </div>
             <p class="progress-text" id="uploadProgressText">准备上传...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- WebRTC 视频通话面板 -->
+      <div class="panel-content" id="panel-webrtc" style="display: none;">
+        <div class="webrtc-panel">
+          <div class="webrtc-actions">
+            <button class="btn-primary btn-block" onclick="showCreateRoomModal()">
+              📹 创建房间
+            </button>
+            <button class="btn-secondary btn-block" onclick="showJoinRoomModal()">
+              🚪 加入房间
+            </button>
+          </div>
+          <div class="webrtc-info">
+            <h4>WebRTC 视频通话</h4>
+            <p class="text-muted">创建房间后，分享房间号和密码给朋友，即可开始视频通话</p>
+            <ul class="feature-list">
+              <li>✅ 无需登录即可加入房间</li>
+              <li>✅ 自动分配最优 TURN 服务器</li>
+              <li>✅ 支持多人视频通话</li>
+              <li>✅ 端到端加密传输</li>
+            </ul>
+          </div>
+          <div id="currentRoomInfo" style="display: none;">
+            <div class="room-info-card">
+              <h4>当前房间</h4>
+              <div class="room-detail">
+                <span class="label">房间号:</span>
+                <span class="value" id="currentRoomId">-</span>
+                <button class="btn-sm btn-secondary" onclick="copyRoomId()">复制</button>
+              </div>
+              <div class="room-detail">
+                <span class="label">密码:</span>
+                <span class="value" id="currentRoomPassword">-</span>
+                <button class="btn-sm btn-secondary" onclick="copyRoomPassword()">复制</button>
+              </div>
+              <div class="room-detail" style="flex-direction:column;align-items:flex-start;">
+                <span class="label">分享链接:</span>
+                <span class="value" id="currentRoomLink" style="font-size:12px;word-break:break-all;margin:4px 0;">-</span>
+                <button class="btn-sm btn-secondary" onclick="copyRoomLink()">复制链接</button>
+              </div>
+              <button class="btn-primary btn-block" onclick="copyRoomInfo()" style="margin-bottom:8px;">📋 复制全部信息</button>
+              <button class="btn-danger btn-block" onclick="leaveRoom()">离开房间</button>
+            </div>
           </div>
         </div>
       </div>
@@ -577,6 +629,136 @@
       <span class="dropdown-icon">🔗</span>
       使用邀请码
     </button>
+    <button class="dropdown-item" onclick="showCreateRoomModal()">
+      <span class="dropdown-icon">📹</span>
+      创建视频房间
+    </button>
+    <button class="dropdown-item" onclick="showJoinRoomModal()">
+      <span class="dropdown-icon">🚪</span>
+      加入视频房间
+    </button>
+  </div>
+
+  <!-- 创建视频房间模态框 -->
+  <div class="modal" id="createRoomModal" style="display: none;">
+    <div class="modal-backdrop" onclick="closeModal('createRoomModal')"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>📹 创建视频房间</h3>
+        <button class="icon-btn" onclick="closeModal('createRoomModal')">✕</button>
+      </div>
+      <form onsubmit="createVideoRoom(event)">
+        <div class="form-group">
+          <label>房间名称（可选）</label>
+          <input type="text" id="roomName" placeholder="例如：小明的房间">
+        </div>
+        <div class="form-group">
+          <label>房间密码（可选，不填自动生成）</label>
+          <input type="text" id="roomPassword" placeholder="6位数字密码">
+        </div>
+        <div class="form-group">
+          <label>最大人数</label>
+          <select id="roomMaxParticipants">
+            <option value="2">2人</option>
+            <option value="5" selected>5人</option>
+            <option value="10">10人</option>
+            <option value="20">20人</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>有效期</label>
+          <select id="roomExpires">
+            <option value="30">30分钟</option>
+            <option value="60">1小时</option>
+            <option value="120" selected>2小时</option>
+            <option value="360">6小时</option>
+          </select>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="closeModal('createRoomModal')">取消</button>
+          <button type="submit" class="btn-primary">创建房间</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 加入视频房间模态框 -->
+  <div class="modal" id="joinRoomModal" style="display: none;">
+    <div class="modal-backdrop" onclick="closeModal('joinRoomModal')"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>🚪 加入视频房间</h3>
+        <button class="icon-btn" onclick="closeModal('joinRoomModal')">✕</button>
+      </div>
+      <form onsubmit="joinVideoRoom(event)">
+        <div class="form-group">
+          <label>房间号</label>
+          <input type="text" id="joinRoomId" required placeholder="6位房间号，如 ABC123" style="text-transform: uppercase;">
+        </div>
+        <div class="form-group">
+          <label>密码</label>
+          <input type="text" id="joinRoomPassword" required placeholder="6位密码">
+        </div>
+        <div class="form-group">
+          <label>您的昵称</label>
+          <input type="text" id="joinDisplayName" required placeholder="显示给其他人的名称">
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="closeModal('joinRoomModal')">取消</button>
+          <button type="submit" class="btn-primary">加入房间</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 视频通话界面模态框 -->
+  <div class="modal fullscreen" id="videoCallModal" style="display: none;">
+    <div class="video-call-container">
+      <!-- 视频网格 -->
+      <div class="video-grid" id="videoGrid">
+        <div class="video-item local" id="localVideoContainer">
+          <video id="localVideo" autoplay muted playsinline></video>
+          <div class="video-label">我</div>
+        </div>
+      </div>
+      
+      <!-- 控制栏 -->
+      <div class="video-controls">
+        <button class="control-btn" id="btnMic" onclick="toggleMic()" title="麦克风">
+          <span class="icon-on">🎤</span>
+          <span class="icon-off" style="display:none;">🔇</span>
+        </button>
+        <button class="control-btn" id="btnCamera" onclick="toggleCamera()" title="摄像头">
+          <span class="icon-on">📹</span>
+          <span class="icon-off" style="display:none;">📷</span>
+        </button>
+        <button class="control-btn" id="btnScreen" onclick="toggleScreenShare()" title="共享屏幕">
+          🖥️
+        </button>
+        <button class="control-btn danger" onclick="leaveRoom()" title="离开">
+          📞
+        </button>
+        <button class="control-btn" onclick="toggleParticipants()" title="参与者">
+          👥
+        </button>
+        <button class="control-btn" onclick="copyRoomInfo()" title="分享房间">
+          🔗
+        </button>
+      </div>
+      
+      <!-- 参与者列表侧边栏 -->
+      <div class="participants-sidebar" id="participantsSidebar" style="display: none;">
+        <div class="sidebar-header">
+          <h4>参与者</h4>
+          <button class="icon-btn" onclick="toggleParticipants()">✕</button>
+        </div>
+        <div class="participants-list" id="participantsList"></div>
+        <div class="room-share-info">
+          <p><strong>房间号:</strong> <span id="shareRoomId">-</span></p>
+          <p><strong>密码:</strong> <span id="shareRoomPassword">-</span></p>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Toast 提示容器 -->

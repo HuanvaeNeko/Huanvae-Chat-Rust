@@ -51,7 +51,8 @@ Nginx/
 
 | 路径 | 目标服务 | 用途 |
 |------|---------|------|
-| `/ws` | backend:8080 | WebSocket 连接（永不超时） |
+| `/ws` | backend:8080 | WebSocket 连接（消息推送） |
+| `/ws/webrtc/*` | backend:8080 | WebRTC 信令 WebSocket |
 | `/api/*` | backend:8080 | 后端 API 服务 |
 | `/user-file/*` | minio:9000 | 用户个人文件（预签名URL + PUT直传） |
 | `/friends-file/*` | minio:9000 | 好友聊天文件（预签名URL + PUT直传） |
@@ -132,7 +133,7 @@ location ~ ^/(user-file|friends-file|group-file|avatars)/ {
 - 支持真实的上传进度条（浏览器直传，无后端中转）
 - 最大支持 5GB 单文件直传，更大文件使用分片上传
 
-### WebSocket 代理（永不超时）
+### WebSocket 代理
 
 ```nginx
 location = /ws {
@@ -141,14 +142,33 @@ location = /ws {
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
     
-    # 永不超时（0 = 无限制）
-    proxy_connect_timeout 0;
-    proxy_send_timeout 0;
-    proxy_read_timeout 0;
+    # 超时时间通过环境变量配置（默认 86400s = 1天）
+    proxy_connect_timeout ${WS_PROXY_TIMEOUT};
+    proxy_send_timeout ${WS_PROXY_TIMEOUT};
+    proxy_read_timeout ${WS_PROXY_TIMEOUT};
+    
+    proxy_buffering off;
+}
+
+# WebRTC 信令 WebSocket
+location /ws/webrtc/ {
+    proxy_pass http://backend;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    
+    proxy_connect_timeout ${WS_PROXY_TIMEOUT};
+    proxy_send_timeout ${WS_PROXY_TIMEOUT};
+    proxy_read_timeout ${WS_PROXY_TIMEOUT};
     
     proxy_buffering off;
 }
 ```
+
+**环境变量 `WS_PROXY_TIMEOUT`**：
+- 默认值：`86400s`（1天）
+- 用途：WebSocket 连接超时时间
+- 配置：在 `.env` 或 `compose.yaml` 中设置
 
 ### 公开头像（带缓存）
 

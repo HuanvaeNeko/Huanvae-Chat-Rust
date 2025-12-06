@@ -9,12 +9,13 @@ services:
       - "443:443"
     environment:
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:8888}
+      - WS_PROXY_TIMEOUT=${WS_PROXY_TIMEOUT:-86400s}
     volumes:
       - ./Nginx/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
       - ./Nginx/conf.d:/etc/nginx/conf.d:ro
       - ./Nginx/ssl:/etc/nginx/ssl:ro
       - ./Nginx/logs:/var/log/nginx
-    command: /bin/sh -c "envsubst '$$CORS_ALLOWED_ORIGINS' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"
+    command: /bin/sh -c "envsubst '$$CORS_ALLOWED_ORIGINS $$WS_PROXY_TIMEOUT' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"
     networks:
       - frontend
       - backend

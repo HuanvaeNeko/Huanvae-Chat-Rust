@@ -77,7 +77,7 @@ impl FileService {
     ) -> Result<FileUploadResponse, AppError> {
         self.upload_service.request_upload(user_id, request).await
     }
-
+    
     /// 验证并完成预签名上传（确认文件已上传到MinIO）
     pub async fn verify_and_complete_presigned_upload(
         &self,

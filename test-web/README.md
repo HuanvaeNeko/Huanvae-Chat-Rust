@@ -63,6 +63,20 @@
 - **自动重连** - 断线后自动尝试重连
 - **浏览器通知** - 支持桌面通知（需授权）
 
+### 📹 WebRTC 视频房间
+- **创建房间** - 登录用户可创建视频房间
+- **加入房间** - 任何人凭房间号+密码即可加入
+- **独立房间页面** - `room.html?room=XXXXX` 可独立分享
+- **多人视频** - 支持多人实时视频通话
+- **屏幕共享** - 支持屏幕/窗口共享，自动重新协商
+- **设备检测** - 自动检测摄像头/麦克风，支持降级（仅音频/观看模式）
+- **TURN 服务器** - 自动分配最优 TURN 节点
+- **媒体控制** - 麦克风/摄像头/屏幕共享开关
+- **参与者列表** - 实时显示房间成员
+- **房间分享** - 一键复制房间链接
+- **ICE 连接监控** - 实时显示连接状态
+- **局域网兼容** - 支持非 HTTPS 环境（剪贴板降级方案）
+
 ### 👤 个人资料
 - 头像上传（最大 10MB）
 - 个人信息修改
@@ -87,6 +101,7 @@
 - 通讯录（好友管理）
 - 群聊管理
 - 文件管理
+- **视频通话**（WebRTC 视频房间）
 - **WebSocket 状态指示器**（点击可手动重连/断开）
 - 设置
 
@@ -140,8 +155,9 @@ npx serve -p 8888
 ```
 test-web/
 ├── index.html      # 主页面（三栏布局 + 模态框）
+├── room.html       # 独立视频房间页面（可分享链接）
 ├── styles.css      # 样式文件（现代化设计）
-├── app.js          # 应用逻辑（认证、消息、群聊、文件）
+├── app.js          # 应用逻辑（认证、消息、群聊、文件、WebRTC）
 ├── modules/        # 模块化 JS（备用）
 │   ├── state.js
 │   ├── utils.js
@@ -157,18 +173,18 @@ test-web/
 
 ### API 基础 URL
 
-默认通过 Nginx 代理访问后端：
+现在使用**动态 BASE_URL**，自动适配当前访问地址：
 
 ```javascript
-// app.js
-const BASE_URL = 'http://localhost';  // Nginx 代理端口
+// app.js - 自动检测
+const BASE_URL = window.location.port === '8888' || window.location.port === '5500'
+  ? `${window.location.protocol}//${window.location.hostname}`  // 开发模式
+  : window.location.origin;  // 生产模式
 ```
 
-如果需要直接访问后端（不经过 Nginx），修改为：
-
-```javascript
-const BASE_URL = 'http://localhost:8080';  // 后端直连端口
-```
+- **开发模式**（端口 8888/5500）：自动去掉端口，请求发到 Nginx 代理（80 端口）
+- **生产模式**：直接使用当前 origin
+- **局域网访问**：自动使用当前 IP 地址
 
 ### 主题适配
 
@@ -215,6 +231,18 @@ const BASE_URL = 'http://localhost:8080';  // 后端直连端口
 | | 自动重连 | ✅ |
 | | 系统通知 | ✅ |
 | | 浏览器通知 | ✅ |
+| **WebRTC** | 创建视频房间 | ✅ |
+| | 加入视频房间 | ✅ |
+| | 多人视频通话 | ✅ |
+| | TURN 服务器分配 | ✅ |
+| | 麦克风/摄像头控制 | ✅ |
+| | 参与者列表 | ✅ |
+| | 房间链接分享 | ✅ |
+|| | 屏幕共享（自动重协商） | ✅ |
+|| | 设备检测/降级 | ✅ |
+|| | ICE 连接监控 | ✅ |
+|| | 独立房间页面 | ✅ |
+|| | 剪贴板兼容（非HTTPS） | ✅ |
 
 ## 🛠️ 技术栈
 
@@ -273,6 +301,11 @@ const BASE_URL = 'http://localhost:8080';  // 后端直连端口
 - `GET /api/storage/files` - 文件列表
 - `POST /api/storage/file/:uuid/presigned_url` - 获取预签名 URL
 - `POST /api/storage/friends_file/:uuid/presigned_url` - 好友文件 URL
+
+### WebRTC 视频房间
+- `POST /api/webrtc/rooms` - 创建视频房间（需登录）
+- `POST /api/webrtc/rooms/:room_id/join` - 加入视频房间
+- `WebSocket /ws/webrtc/rooms/:room_id?token=xxx` - 房间信令连接
 
 ### 资料相关
 - `GET /api/profile` - 获取资料

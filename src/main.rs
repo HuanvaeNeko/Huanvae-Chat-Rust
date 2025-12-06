@@ -15,6 +15,8 @@ use huanvae_chat::groups::create_group_routes;
 use huanvae_chat::group_messages::create_group_messages_routes;
 use huanvae_chat::profile::handlers::routes::profile_routes;
 use huanvae_chat::storage::{create_storage_routes, S3Client};
+use huanvae_chat::turn::turn_routes;
+use huanvae_chat::webrtc_room::webrtc_room_routes;
 use huanvae_chat::websocket::ws_routes;
 
 #[tokio::main]
@@ -239,6 +241,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         // WebSocket 路由
         .merge(ws_routes(app_state.ws_state()))
+        // TURN 协调路由
+        .merge(turn_routes(app_state.turn_state(), app_state.auth_state()))
+        // WebRTC 房间路由
+        .merge(webrtc_room_routes(app_state.webrtc_state(), app_state.auth_state()))
         // 日志中间件（CORS 由 Nginx 统一处理）
         .layer(tower_http::trace::TraceLayer::new_for_http());
 
