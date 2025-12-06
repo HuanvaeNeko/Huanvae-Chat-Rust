@@ -2,7 +2,7 @@
 .env
 
 # Rust 构建产物
-/target/debug
+/target/debug/
 Cargo.lock
 
 # 数据目录
