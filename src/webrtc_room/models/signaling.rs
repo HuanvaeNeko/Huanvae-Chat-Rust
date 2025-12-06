@@ -38,6 +38,9 @@ pub enum ClientSignaling {
 
     /// 离开房间
     Leave,
+    
+    /// 心跳（保持连接活跃）
+    Ping,
 }
 
 /// ICE Candidate 信息
@@ -118,6 +121,9 @@ pub enum ServerSignaling {
         /// 错误信息
         message: String,
     },
+    
+    /// 心跳响应
+    Pong,
 }
 
 impl ServerSignaling {

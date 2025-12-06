@@ -249,6 +249,12 @@ async fn handle_client_message(
             );
             // 实际的清理在连接断开时处理
         }
+        
+        ClientSignaling::Ping => {
+            // 回复心跳
+            let pong = ServerSignaling::Pong;
+            state.room_manager.send_to_participant(room_id, from_id, &pong);
+        }
     }
 }
 

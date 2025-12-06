@@ -574,6 +574,13 @@
       micEnabled: true,
       cameraEnabled: true,
       isScreenSharing: false,
+      // 重连相关状态
+      reconnectAttempts: 0,
+      maxReconnectAttempts: 10,
+      reconnectTimer: null,
+      heartbeatTimer: null,
+      isReconnecting: false,
+      shouldReconnect: true,  // 是否应该重连（用户主动离开时设为 false）
     };
 
     // 初始化：从 URL 获取房间号
@@ -676,6 +683,11 @@
 
     // 开始视频通话
     async function startVideoCall() {
+      // 重置重连状态（开始新的会话）
+      state.shouldReconnect = true;
+      state.reconnectAttempts = 0;
+      state.isReconnecting = false;
+      
       try {
         // 先枚举设备检测可用性
         const devices = await navigator.mediaDevices.enumerateDevices();
@@ -864,12 +876,18 @@
       }
     }
 
-    // 连接信令服务器
+    // 连接信令服务器（支持自动重连）
     function connectSignaling() {
+      // 清除之前的重连定时器
+      if (state.reconnectTimer) {
+        clearTimeout(state.reconnectTimer);
+        state.reconnectTimer = null;
+      }
+      
       const wsUrl = `${BASE_URL.replace('http', 'ws')}/ws/webrtc/rooms/${state.roomId}?token=${state.wsToken}`;
       
-      console.log('🔗 连接信令服务器:', wsUrl);
-      document.getElementById('roomStatus').textContent = '连接中...';
+      console.log('🔗 连接信令服务器:', wsUrl, state.isReconnecting ? '(重连)' : '');
+      document.getElementById('roomStatus').textContent = state.isReconnecting ? '重连中...' : '连接中...';
       
       const ws = new WebSocket(wsUrl);
       state.signalingWs = ws;
@@ -877,7 +895,19 @@
       ws.onopen = () => {
         console.log('✅ 信令连接已建立');
         document.getElementById('roomStatus').textContent = '已连接';
-        showToast('已连接到房间', 'success');
+        
+        // 重置重连计数
+        state.reconnectAttempts = 0;
+        state.isReconnecting = false;
+        
+        if (state.reconnectAttempts === 0) {
+          showToast('已连接到房间', 'success');
+        } else {
+          showToast('重新连接成功', 'success');
+        }
+        
+        // 启动心跳
+        startHeartbeat();
       };
       
       ws.onmessage = (event) => {
@@ -885,18 +915,76 @@
         handleSignalingMessage(msg);
       };
       
-      ws.onclose = () => {
-        console.log('❌ 信令连接已断开');
+      ws.onclose = (event) => {
+        console.log('❌ 信令连接已断开, code:', event.code, 'reason:', event.reason);
         document.getElementById('roomStatus').textContent = '已断开';
-        if (state.roomId) {
+        
+        // 停止心跳
+        stopHeartbeat();
+        
+        // 检查是否应该重连
+        if (state.shouldReconnect && state.roomId && state.wsToken) {
+          attemptReconnect();
+        } else if (state.roomId) {
           showToast('与房间的连接已断开', 'error');
         }
       };
       
       ws.onerror = (err) => {
         console.error('信令错误:', err);
-        showToast('连接错误', 'error');
+        // 不在这里显示 toast，让 onclose 处理
       };
+    }
+    
+    // 尝试重连
+    function attemptReconnect() {
+      if (state.reconnectAttempts >= state.maxReconnectAttempts) {
+        console.log('❌ 达到最大重连次数，停止重连');
+        showToast('连接失败，请刷新页面重试', 'error');
+        state.isReconnecting = false;
+        return;
+      }
+      
+      state.reconnectAttempts++;
+      state.isReconnecting = true;
+      
+      // 指数退避：1s, 2s, 4s, 8s... 最大 30s
+      const delay = Math.min(1000 * Math.pow(2, state.reconnectAttempts - 1), 30000);
+      
+      console.log(`🔄 ${delay/1000}秒后尝试第 ${state.reconnectAttempts} 次重连...`);
+      document.getElementById('roomStatus').textContent = `重连中 (${state.reconnectAttempts}/${state.maxReconnectAttempts})...`;
+      showToast(`连接断开，${delay/1000}秒后重连...`, 'warning');
+      
+      state.reconnectTimer = setTimeout(() => {
+        if (state.shouldReconnect) {
+          connectSignaling();
+        }
+      }, delay);
+    }
+    
+    // 启动心跳
+    function startHeartbeat() {
+      stopHeartbeat();
+      
+      // 每 25 秒发送一次心跳
+      state.heartbeatTimer = setInterval(() => {
+        if (state.signalingWs && state.signalingWs.readyState === WebSocket.OPEN) {
+          try {
+            state.signalingWs.send(JSON.stringify({ type: 'ping' }));
+            console.log('💓 心跳发送');
+          } catch (e) {
+            console.error('心跳发送失败:', e);
+          }
+        }
+      }, 25000);
+    }
+    
+    // 停止心跳
+    function stopHeartbeat() {
+      if (state.heartbeatTimer) {
+        clearInterval(state.heartbeatTimer);
+        state.heartbeatTimer = null;
+      }
     }
 
     // 处理信令消息
@@ -1137,6 +1225,18 @@
     }
 
     function leaveRoom() {
+      // 禁止自动重连（用户主动离开）
+      state.shouldReconnect = false;
+      
+      // 清除重连定时器
+      if (state.reconnectTimer) {
+        clearTimeout(state.reconnectTimer);
+        state.reconnectTimer = null;
+      }
+      
+      // 停止心跳
+      stopHeartbeat();
+      
       sendSignaling({ type: 'leave' });
       
       Object.keys(state.peerConnections).forEach(closePeerConnection);

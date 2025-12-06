@@ -1667,67 +1667,108 @@ h4 {
   }
 }
 
-/* 上传进度条覆盖层 */
+/* 上传进度条 - 底部固定，不阻挡操作 */
 .upload-progress-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  bottom: 20px;
+  right: 20px;
   z-index: 9999;
-  backdrop-filter: blur(4px);
+  pointer-events: auto;
+  animation: slideInUp 0.3s ease;
+}
+
+@keyframes slideInUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 .upload-progress-modal {
   background: var(--bg-white);
   border-radius: 12px;
-  padding: 24px 32px;
-  min-width: 360px;
-  max-width: 90%;
-  box-shadow: var(--shadow-lg);
+  padding: 12px 16px;
+  min-width: 280px;
+  max-width: 360px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--border-light);
 }
 
 .upload-progress-title {
-  font-size: 18px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 8px;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.upload-progress-title::before {
+  content: '📤';
+  font-size: 14px;
 }
 
 .upload-progress-filename {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-secondary);
-  margin-bottom: 16px;
+  margin-bottom: 8px;
   word-break: break-all;
-  max-width: 400px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .upload-progress-bar {
-  height: 8px;
+  height: 6px;
   background: var(--bg-base);
-  border-radius: 4px;
+  border-radius: 3px;
   overflow: hidden;
-  margin-bottom: 12px;
+  margin-bottom: 6px;
 }
 
 .upload-progress-fill {
   height: 100%;
   background: linear-gradient(90deg, #667eea, #764ba2);
-  border-radius: 4px;
-  transition: width 0.3s ease;
+  border-radius: 3px;
+  transition: width 0.2s ease;
 }
 
 .upload-progress-text {
-  font-size: 13px;
-  color: var(--text-secondary);
-  text-align: center;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: right;
+}
+
+/* 多个上传任务堆叠 */
+.upload-progress-overlay + .upload-progress-overlay {
+  bottom: auto;
+  top: auto;
+  margin-bottom: 10px;
+}
+
+/* 上传进度容器 - 支持多任务 */
+.upload-progress-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.upload-progress-container .upload-progress-overlay {
+  position: relative;
+  bottom: auto;
+  right: auto;
+  pointer-events: auto;
 }
 
 /* ==========================================

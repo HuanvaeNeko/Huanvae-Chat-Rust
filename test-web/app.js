@@ -8,9 +8,20 @@
 // ==========================================
 
 // 根据当前域名自动选择 API 地址
-const BASE_URL = window.location.hostname.startsWith('web.') 
-  ? `${window.location.protocol}//api.${window.location.hostname.slice(4)}`  // web.xxx -> api.xxx
-  : `${window.location.protocol}//${window.location.hostname}`;  // 本地开发使用当前地址
+const BASE_URL = (() => {
+  const hostname = window.location.hostname;
+  const protocol = window.location.protocol;
+  
+  // web.xxx.cn -> api.xxx.cn
+  if (hostname.startsWith('web.')) {
+    return `${protocol}//api.${hostname.slice(4)}`;
+  }
+  
+  // 本地 IP 访问（如 192.168.x.x）或 localhost -> 去掉端口，使用 80
+  return `${protocol}//${hostname}`;
+})();
+
+console.log('📡 API 地址:', BASE_URL);
 
 const state = {
   accessToken: localStorage.getItem('accessToken') || '',
@@ -2255,17 +2266,19 @@ async function sendFileMessage(files) {
   const file = files[0];
   const { type, id } = state.currentChat;
   
-  // 创建进度条 UI
+  // 创建进度条 UI（底部固定，不阻挡操作）
   const progressOverlay = createUploadProgressOverlay(file.name);
-  document.body.appendChild(progressOverlay);
-  const updateProgress = (percent, text) => {
+  const updateProgress = (percent, status) => {
     progressOverlay.querySelector('.upload-progress-fill').style.width = percent + '%';
-    progressOverlay.querySelector('.upload-progress-text').textContent = text;
+    progressOverlay.querySelector('.upload-progress-text').textContent = Math.round(percent) + '%';
+    if (status) {
+      progressOverlay.querySelector('.upload-progress-title').textContent = status;
+    }
   };
   
   try {
     // 计算哈希
-    updateProgress(5, '计算文件哈希...');
+    updateProgress(5, '计算哈希');
     const file_hash = await calculateSHA256(file);
     
     // 根据聊天类型确定文件类型
@@ -2281,7 +2294,7 @@ async function sendFileMessage(files) {
     }
     
     // 请求上传凭证
-    updateProgress(10, '请求上传凭证...');
+    updateProgress(10, '准备上传');
     const uploadInfo = await api('/api/storage/upload/request', {
       method: 'POST',
       body: {
@@ -2298,9 +2311,9 @@ async function sendFileMessage(files) {
     
     // 秒传检查
     if (uploadInfo.instant_upload) {
-      updateProgress(100, '秒传成功！');
+      updateProgress(100, '✓ 秒传成功');
       showToast('发送成功（秒传）', 'success');
-      setTimeout(() => progressOverlay.remove(), 1000);
+      setTimeout(() => progressOverlay.remove(), 1500);
       await new Promise(r => setTimeout(r, 300));
       loadMessages();
       return;
@@ -2316,24 +2329,24 @@ async function sendFileMessage(files) {
       } catch (e) {}
       
       // PUT 直传 MinIO（真实进度）
-      updateProgress(15, '开始上传...');
+      updateProgress(15, '上传中');
       await uploadToMinioWithProgress(presignedUrl, file, (percent) => {
         const realPercent = 15 + percent * 0.75; // 15% - 90%
-        updateProgress(realPercent, `上传中 ${Math.round(percent)}%`);
+        updateProgress(realPercent);
       });
       
       // 确认上传
-      updateProgress(92, '确认上传...');
+      updateProgress(92, '完成中');
       const confirmResult = await api('/api/storage/upload/confirm', {
         method: 'POST',
         body: { file_key: uploadInfo.file_key }
       });
       
-      updateProgress(100, '发送成功！');
+      updateProgress(100, '✓ 上传成功');
       console.log('上传确认响应:', confirmResult);
       showToast('发送成功', 'success');
       
-      setTimeout(() => progressOverlay.remove(), 1500);
+      setTimeout(() => progressOverlay.remove(), 1200);
       await new Promise(r => setTimeout(r, 300));
       loadMessages();
       return;
@@ -2348,8 +2361,9 @@ async function sendFileMessage(files) {
     
   } catch (err) {
     console.error('文件上传错误:', err);
-    updateProgress(0, '上传失败: ' + (err.message || '未知错误'));
+    updateProgress(0, '✕ 上传失败');
     progressOverlay.querySelector('.upload-progress-fill').style.background = '#e74c3c';
+    progressOverlay.querySelector('.upload-progress-text').textContent = err.message || '未知错误';
     showToast(err.message || '上传失败', 'error');
     setTimeout(() => progressOverlay.remove(), 3000);
   }
@@ -2386,20 +2400,39 @@ function uploadToMinioWithProgress(url, file, onProgress) {
   });
 }
 
-// 创建上传进度条覆盖层
+// 获取或创建上传进度容器
+function getUploadProgressContainer() {
+  let container = document.getElementById('uploadProgressContainer');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'uploadProgressContainer';
+    container.className = 'upload-progress-container';
+    document.body.appendChild(container);
+  }
+  return container;
+}
+
+// 创建上传进度条（底部固定，不阻挡操作）
 function createUploadProgressOverlay(filename) {
+  const container = getUploadProgressContainer();
   const overlay = document.createElement('div');
   overlay.className = 'upload-progress-overlay';
+  
+  // 截断过长的文件名
+  const displayName = filename.length > 30 ? filename.slice(0, 27) + '...' : filename;
+  
   overlay.innerHTML = `
     <div class="upload-progress-modal">
-      <div class="upload-progress-title">上传文件</div>
-      <div class="upload-progress-filename">${filename}</div>
+      <div class="upload-progress-title">正在上传</div>
+      <div class="upload-progress-filename" title="${filename}">${displayName}</div>
       <div class="upload-progress-bar">
         <div class="upload-progress-fill" style="width: 0%"></div>
       </div>
-      <div class="upload-progress-text">准备中...</div>
+      <div class="upload-progress-text">0%</div>
     </div>
   `;
+  
+  container.appendChild(overlay);
   return overlay;
 }
 
