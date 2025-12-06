@@ -81,6 +81,10 @@ NODE_ID=turn-node-01
 # 节点区域（用于就近分配）
 REGION=cn-east
 
+# 中继绑定 IP（云服务器 NAT 环境使用 0.0.0.0，默认 0.0.0.0）
+# 如果是物理服务器可以设置为公网 IP
+RELAY_IP=0.0.0.0
+
 # TURN 端口配置
 TURN_PORT=3478
 TURN_TLS_PORT=5349

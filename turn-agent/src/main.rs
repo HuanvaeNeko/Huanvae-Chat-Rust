@@ -52,6 +52,7 @@ async fn main() {
     info!("  节点 ID:   {}", config.node_id);
     info!("  区域:      {}", config.region);
     info!("  公网 IP:   {}", config.public_ip);
+    info!("  中继 IP:   {}", config.relay_ip);
     info!("  服务器:    {}", config.coordinator_url);
     info!("  心跳间隔:  {}秒", config.heartbeat_interval);
 

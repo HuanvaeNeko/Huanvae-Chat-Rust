@@ -68,6 +68,7 @@ impl CoturnManager {
             .replace("${TURN_PORT}", &agent_config.turn_port.to_string())
             .replace("${TURN_TLS_PORT}", &agent_config.turn_tls_port.to_string())
             .replace("${PUBLIC_IP}", &agent_config.public_ip)
+            .replace("${RELAY_IP}", &agent_config.relay_ip)
             .replace("${AUTH_SECRET}", &turn_config.auth_secret)
             .replace("${REALM}", &turn_config.realm)
             .replace("${RELAY_MIN_PORT}", &agent_config.relay_min_port.to_string())

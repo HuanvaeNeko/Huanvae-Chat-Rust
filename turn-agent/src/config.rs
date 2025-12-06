@@ -13,8 +13,10 @@ pub struct AgentConfig {
     pub node_id: String,
     /// 节点区域
     pub region: String,
-    /// 公网 IP
+    /// 公网 IP（客户端连接使用）
     pub public_ip: String,
+    /// 中继绑定 IP（云服务器使用 0.0.0.0 或内网 IP）
+    pub relay_ip: String,
     /// 主服务器 WebSocket 地址
     pub coordinator_url: String,
     /// Agent 认证令牌
@@ -109,10 +111,15 @@ impl AgentConfig {
             .parse()
             .unwrap_or(5);
 
+        // 中继绑定 IP，默认 0.0.0.0（适用于云服务器 NAT 环境）
+        let relay_ip = env::var("RELAY_IP")
+            .unwrap_or_else(|_| "0.0.0.0".to_string());
+
         Ok(Self {
             node_id,
             region,
             public_ip,
+            relay_ip,
             coordinator_url,
             coordinator_token,
             turn_port,
