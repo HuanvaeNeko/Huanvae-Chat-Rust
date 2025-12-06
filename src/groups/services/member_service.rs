@@ -37,65 +37,73 @@ impl MemberService {
         Ok(member)
     }
 
+    /// 统一的权限验证方法
+    /// 
+    /// 复用 `get_member_role` 的查询结果，避免重复的数据库查询
+    /// 
+    /// # Arguments
+    /// * `group_id` - 群ID
+    /// * `user_id` - 用户ID  
+    /// * `required` - 所需的权限级别
+    /// 
+    /// # Returns
+    /// * `Ok(true)` - 用户满足权限要求
+    /// * `Ok(false)` - 用户不满足权限要求
+    pub async fn check_permission(
+        &self,
+        group_id: &Uuid,
+        user_id: &str,
+        required: RequiredPermission,
+    ) -> Result<bool, AppError> {
+        let member = self.get_member_role(group_id, user_id).await?;
+        
+        match member {
+            None => Ok(false),
+            Some(m) if m.status != "active" => Ok(false),
+            Some(m) => {
+                let has_permission = match required {
+                    RequiredPermission::ActiveMember => true,
+                    RequiredPermission::AdminOrOwner => {
+                        m.role == "owner" || m.role == "admin"
+                    }
+                    RequiredPermission::OwnerOnly => m.role == "owner",
+                };
+                Ok(has_permission)
+            }
+        }
+    }
+
     /// 验证用户是否为活跃群成员
+    /// 
+    /// 便捷方法，内部调用 `check_permission`
     pub async fn verify_active_member(
         &self,
         group_id: &Uuid,
         user_id: &str,
     ) -> Result<bool, AppError> {
-        let result: Option<(String,)> = sqlx::query_as(
-            r#"SELECT "status" FROM "group-members" 
-               WHERE "group-id" = $1 AND "user-id" = $2"#,
-        )
-        .bind(group_id)
-        .bind(user_id)
-        .fetch_optional(&self.db)
-        .await
-        .map_err(|e| AppError::Database(format!("验证成员状态失败: {}", e)))?;
-
-        Ok(result.map(|(s,)| s == "active").unwrap_or(false))
+        self.check_permission(group_id, user_id, RequiredPermission::ActiveMember).await
     }
 
     /// 验证用户是否为群主或管理员
+    /// 
+    /// 便捷方法，内部调用 `check_permission`
     pub async fn verify_admin_or_owner(
         &self,
         group_id: &Uuid,
         user_id: &str,
     ) -> Result<bool, AppError> {
-        let result: Option<(String, String)> = sqlx::query_as(
-            r#"SELECT "role", "status" FROM "group-members" 
-               WHERE "group-id" = $1 AND "user-id" = $2"#,
-        )
-        .bind(group_id)
-        .bind(user_id)
-        .fetch_optional(&self.db)
-        .await
-        .map_err(|e| AppError::Database(format!("验证管理员权限失败: {}", e)))?;
-
-        Ok(result
-            .map(|(role, status)| status == "active" && (role == "owner" || role == "admin"))
-            .unwrap_or(false))
+        self.check_permission(group_id, user_id, RequiredPermission::AdminOrOwner).await
     }
 
     /// 验证用户是否为群主
+    /// 
+    /// 便捷方法，内部调用 `check_permission`
     pub async fn verify_owner(
         &self,
         group_id: &Uuid,
         user_id: &str,
     ) -> Result<bool, AppError> {
-        let result: Option<(String, String)> = sqlx::query_as(
-            r#"SELECT "role", "status" FROM "group-members" 
-               WHERE "group-id" = $1 AND "user-id" = $2"#,
-        )
-        .bind(group_id)
-        .bind(user_id)
-        .fetch_optional(&self.db)
-        .await
-        .map_err(|e| AppError::Database(format!("验证群主权限失败: {}", e)))?;
-
-        Ok(result
-            .map(|(role, status)| status == "active" && role == "owner")
-            .unwrap_or(false))
+        self.check_permission(group_id, user_id, RequiredPermission::OwnerOnly).await
     }
 
     /// 获取群成员列表

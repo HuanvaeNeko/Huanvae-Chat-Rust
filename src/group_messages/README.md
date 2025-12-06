@@ -110,6 +110,10 @@ src/group_messages/
 - 必须是群成员
 - 不能被禁言
 
+> 📝 **实现说明**：未读消息计数更新由 `NotificationService` 统一处理，
+> 通过 `UnreadService.batch_increment_group_unread` 方法批量更新所有群成员的未读计数。
+> 这避免了代码重复，保持单一数据源原则。参见 `websocket/services/notification_service.rs`。
+
 ### 2. 获取群消息列表
 
 **端点**: `GET /api/group-messages?group_id=xxx&before_time=xxx&limit=50`

@@ -177,6 +177,32 @@ src/groups/
 | 转让群主 | ✅ | ❌ | ❌ |
 | 解散群聊 | ✅ | ❌ | ❌ |
 
+### 权限验证 API
+
+`MemberService` 提供统一的权限验证方法 `check_permission()`：
+
+```rust
+use crate::groups::models::RequiredPermission;
+
+// 统一的权限验证（推荐使用）
+let has_permission = member_service
+    .check_permission(&group_id, &user_id, RequiredPermission::AdminOrOwner)
+    .await?;
+
+// 便捷方法（内部调用 check_permission）
+let is_active = member_service.verify_active_member(&group_id, &user_id).await?;
+let is_admin = member_service.verify_admin_or_owner(&group_id, &user_id).await?;
+let is_owner = member_service.verify_owner(&group_id, &user_id).await?;
+```
+
+**RequiredPermission 枚举**：
+
+| 值 | 说明 |
+|---|---|
+| `ActiveMember` | 任何活跃群成员 |
+| `AdminOrOwner` | 管理员或群主 |
+| `OwnerOnly` | 仅群主 |
+
 ## 🔄 业务流程
 
 ### 转让群主

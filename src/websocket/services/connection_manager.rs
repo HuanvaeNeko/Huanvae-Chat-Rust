@@ -273,13 +273,9 @@ impl ConnectionManager {
     }
 }
 
-impl Clone for ConnectionManager {
-    fn clone(&self) -> Self {
-        // ConnectionManager 通常通过 Arc 共享，这里的 clone 创建新实例
-        // 实际使用时应该使用 Arc<ConnectionManager>
-        Self::new()
-    }
-}
+// 注意：ConnectionManager 不实现 Clone
+// 它必须通过 Arc<ConnectionManager> 共享，确保所有引用指向同一个连接状态
+// 参见 app_state.rs 中的使用方式：pub connection_manager: Arc<ConnectionManager>
 
 #[cfg(test)]
 mod tests {

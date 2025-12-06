@@ -145,3 +145,16 @@ pub struct MemberBrief {
     pub muted_until: Option<DateTime<Utc>>,
 }
 
+/// 权限要求枚举
+/// 
+/// 用于统一的权限验证方法 `check_permission`
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RequiredPermission {
+    /// 任何活跃成员
+    ActiveMember,
+    /// 管理员或群主
+    AdminOrOwner,
+    /// 仅群主
+    OwnerOnly,
+}
+

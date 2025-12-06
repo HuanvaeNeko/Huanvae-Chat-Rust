@@ -4,12 +4,48 @@
 
 ## 📁 文件列表
 
+- `file_service.rs` - 统一文件服务（门面模式）
+- `file_upload_service.rs` - 文件上传服务
+- `file_download_service.rs` - 文件下载服务
+- `file_query_service.rs` - 文件查询服务
 - `avatar.rs` - 头像上传服务
-- `file_service.rs` - 统一文件上传服务
 - `deduplication.rs` - 去重/秒传服务
 - `uuid_mapping.rs` - UUID映射服务
 - `validator.rs` - 文件验证服务
 - `mod.rs` - 模块导出
+
+## 🏗️ FileService 架构（门面模式）
+
+`FileService` 作为统一入口，内部委托给专门的子服务处理：
+
+```
+FileService（门面）
+    ├── FileUploadService   → 文件上传相关操作
+    ├── FileDownloadService → 文件下载相关操作
+    └── FileQueryService    → 文件查询相关操作
+```
+
+**优势**：
+- 保持对外 API 稳定，调用方无需修改代码
+- 内部代码按职责拆分，更易维护和测试
+- 各子服务可独立扩展
+
+**使用示例**：
+
+```rust
+// 外部调用方式不变
+let file_service = FileService::new(db, s3_client, api_base_url);
+
+// 上传相关
+let response = file_service.request_upload(user_id, request).await?;
+let record = file_service.verify_and_complete_presigned_upload(file_key, user_id).await?;
+
+// 下载相关
+let presigned = file_service.generate_presigned_url(user_id, file_uuid, expires_in).await?;
+
+// 查询相关
+let files = file_service.list_user_files(user_id, page, limit, sort_by, sort_order).await?;
+```
 
 ## 🚀 DeduplicationService（秒传核心）
 

@@ -249,6 +249,10 @@ ws://localhost:8080/ws?token=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
 - 原子操作保证线程安全
 - 使用 DashMap 实现无锁读取
 
+> ⚠️ **重要**：`ConnectionManager` 不实现 `Clone` trait，必须通过 `Arc<ConnectionManager>` 共享。
+> 这确保了所有引用指向同一个连接状态，避免状态不一致的问题。
+> 参见 `app_state.rs` 中的使用方式：`pub connection_manager: Arc<ConnectionManager>`
+
 ```rust
 // 向指定用户发送消息（所有设备）
 connection_manager.send_to_user("user123", &message);

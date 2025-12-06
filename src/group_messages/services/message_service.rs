@@ -19,6 +19,9 @@ impl GroupMessageService {
     }
 
     /// 发送群消息
+    /// 
+    /// 注意：未读计数更新已统一由 NotificationService 处理
+    /// 参见 websocket/services/notification_service.rs 中的 notify_group_message
     pub async fn send_message(
         &self,
         group_id: &Uuid,
@@ -53,32 +56,9 @@ impl GroupMessageService {
         .await
         .map_err(|e| AppError::Database(format!("发送群消息失败: {}", e)))?;
 
-        // 更新所有群成员的未读消息计数
-        sqlx::query(
-            r#"INSERT INTO "group-unread-messages" 
-               ("user-id", "group-id", "unread-count", "last-message-uuid", "last-message-content", 
-                "last-message-type", "last-message-time", "last-sender-id")
-               SELECT gm."user-id", $1, 1, $2, $3, $4, $5, $6
-               FROM "group-members" gm
-               WHERE gm."group-id" = $1 AND gm."status" = 'active' AND gm."user-id" != $6
-               ON CONFLICT ("user-id", "group-id") DO UPDATE SET
-                 "unread-count" = "group-unread-messages"."unread-count" + 1,
-                 "last-message-uuid" = $2,
-                 "last-message-content" = $3,
-                 "last-message-type" = $4,
-                 "last-message-time" = $5,
-                 "last-sender-id" = $6,
-                 "updated-at" = CURRENT_TIMESTAMP"#,
-        )
-        .bind(group_id)
-        .bind(message_uuid)
-        .bind(message_content)
-        .bind(message_type)
-        .bind(now)
-        .bind(sender_id)
-        .execute(&self.db)
-        .await
-        .ok(); // 未读计数更新失败不影响消息发送
+        // 未读计数更新已移至 NotificationService.notify_group_message
+        // 通过 UnreadService.batch_increment_group_unread 统一处理
+        // 这样避免了重复的 SQL 逻辑，保持单一数据源
 
         Ok(SendMessageResponse {
             message_uuid: message_uuid.to_string(),
