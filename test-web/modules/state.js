@@ -2,11 +2,16 @@
  * 状态管理模块
  */
 
+// 根据当前域名自动选择 API 地址
+const BASE_HOST = window.location.hostname.startsWith('web.') 
+  ? `${window.location.protocol}//api.${window.location.hostname.slice(4)}`  // web.xxx -> api.xxx
+  : `${window.location.protocol}//${window.location.hostname}`;  // 本地开发使用当前地址
+
 export const state = {
-  apiBase: localStorage.getItem('apiBase') || 'http://localhost/api/auth',
-  friendsBase: localStorage.getItem('friendsApiBase') || 'http://localhost/api/friends',
-  messagesBase: localStorage.getItem('messagesApiBase') || 'http://localhost/api/messages',
-  storageBase: localStorage.getItem('storageApiBase') || 'http://localhost/api/storage',
+  apiBase: localStorage.getItem('apiBase') || `${BASE_HOST}/api/auth`,
+  friendsBase: localStorage.getItem('friendsApiBase') || `${BASE_HOST}/api/friends`,
+  messagesBase: localStorage.getItem('messagesApiBase') || `${BASE_HOST}/api/messages`,
+  storageBase: localStorage.getItem('storageApiBase') || `${BASE_HOST}/api/storage`,
   accessToken: localStorage.getItem('accessToken') || '',
   refreshToken: localStorage.getItem('refreshToken') || '',
   uploadedFiles: JSON.parse(localStorage.getItem('uploadedFiles') || '[]'),

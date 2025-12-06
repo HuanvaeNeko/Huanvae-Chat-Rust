@@ -7,10 +7,10 @@
 // 配置和全局状态
 // ==========================================
 
-// 动态获取当前网址的 origin（协议+域名/IP，不带路径）
-const BASE_URL = window.location.port === '8888' || window.location.port === '5500'
-  ? `${window.location.protocol}//${window.location.hostname}`  // 开发模式：去掉端口
-  : window.location.origin;  // 生产模式：直接使用当前 origin
+// 根据当前域名自动选择 API 地址
+const BASE_URL = window.location.hostname.startsWith('web.') 
+  ? `${window.location.protocol}//api.${window.location.hostname.slice(4)}`  // web.xxx -> api.xxx
+  : `${window.location.protocol}//${window.location.hostname}`;  // 本地开发使用当前地址
 
 const state = {
   accessToken: localStorage.getItem('accessToken') || '',
@@ -33,56 +33,11 @@ const state = {
   wsReconnectTimer: null, // 重连定时器
   wsPingInterval: null,   // 心跳定时器
   unreadSummary: null,    // 未读消息摘要
-  
-  // WebRTC 视频房间
-  webrtc: {
-    roomId: null,
-    roomPassword: null,
-    wsToken: null,
-    participantId: null,
-    iceServers: [],
-    localStream: null,
-    signalingWs: null,
-    peerConnections: {},
-    participants: [],
-    micEnabled: true,
-    cameraEnabled: true,
-    isScreenSharing: false,
-  }
 };
 
 // ==========================================
 // 工具函数
 // ==========================================
-
-// 复制文本到剪贴板（兼容非 HTTPS 环境）
-function copyToClipboard(text) {
-  // 优先使用现代 API
-  if (navigator.clipboard && window.isSecureContext) {
-    return navigator.clipboard.writeText(text);
-  }
-  
-  // 降级方案：使用传统方法
-  const textarea = document.createElement('textarea');
-  textarea.value = text;
-  textarea.style.position = 'fixed';
-  textarea.style.left = '-9999px';
-  textarea.style.top = '-9999px';
-  document.body.appendChild(textarea);
-  textarea.focus();
-  textarea.select();
-  
-  return new Promise((resolve, reject) => {
-    try {
-      document.execCommand('copy');
-      resolve();
-    } catch (err) {
-      reject(err);
-    } finally {
-      document.body.removeChild(textarea);
-    }
-  });
-}
 
 // API 请求封装（带自动 Token 刷新）
 async function api(path, { method = 'GET', body, formData, token = state.accessToken, _retried = false } = {}) {
@@ -226,6 +181,125 @@ function openModal(id) {
 
 function closeModal(id) {
   document.getElementById(id).style.display = 'none';
+}
+
+// ==========================================
+// WebRTC 视频房间
+// ==========================================
+
+// 显示创建房间模态框
+function showCreateRoomModal() {
+  if (!state.accessToken) {
+    showToast('请先登录', 'error');
+    openModal('authModal');
+    return;
+  }
+  openModal('createRoomModal');
+}
+
+// 创建视频房间
+async function createVideoRoom(event) {
+  event.preventDefault();
+  
+  const name = document.getElementById('roomName').value.trim();
+  const password = document.getElementById('roomPassword').value.trim();
+  const maxParticipants = parseInt(document.getElementById('roomMaxParticipants').value);
+  const expiresMinutes = parseInt(document.getElementById('roomExpires').value);
+  
+  try {
+    const response = await api('/api/webrtc/rooms', {
+      method: 'POST',
+      body: {
+        name: name || undefined,
+        password: password || undefined,
+        max_participants: maxParticipants,
+        expires_minutes: expiresMinutes  // 修正字段名
+      }
+    });
+    
+    console.log('📹 创建房间响应:', response);  // 调试日志
+    
+    closeModal('createRoomModal');
+    showToast('房间创建成功！', 'success');
+    
+    // 显示房间信息（后端返回 ApiResponse 格式，实际数据在 response.data 中）
+    const roomData = response.data || response;
+    console.log('📹 房间数据:', roomData);  // 调试日志
+    showRoomCreatedInfo(roomData);
+    
+  } catch (err) {
+    showToast(err.message || '创建房间失败', 'error');
+  }
+}
+
+// 显示房间创建成功信息
+function showRoomCreatedInfo(roomData) {
+  const roomId = roomData.room_id || roomData.id;
+  const password = roomData.password || '';
+  
+  // 创建信息弹窗
+  const infoHtml = `
+    <div class="room-created-info">
+      <h4>🎉 房间创建成功</h4>
+      <div class="info-item">
+        <label>房间号：</label>
+        <span class="room-id">${roomId}</span>
+        <button class="btn-small" onclick="copyToClipboard('${roomId}')">复制</button>
+      </div>
+      ${password ? `
+      <div class="info-item">
+        <label>密码：</label>
+        <span class="room-password">${password}</span>
+        <button class="btn-small" onclick="copyToClipboard('${password}')">复制</button>
+      </div>
+      ` : ''}
+      <div class="info-actions">
+        <button class="btn-primary" onclick="goToRoom('${roomId}')">进入房间</button>
+      </div>
+    </div>
+  `;
+  
+  // 使用 toast 或 alert 显示
+  if (confirm(`房间创建成功！\n房间号: ${roomId}\n${password ? '密码: ' + password : ''}\n\n是否立即进入房间？`)) {
+    goToRoom(roomId);
+  }
+}
+
+// 跳转到房间页面
+function goToRoom(roomId) {
+  window.open(`room.html?room=${roomId}`, '_blank');
+}
+
+// 复制到剪贴板
+function copyToClipboard(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('已复制到剪贴板', 'success');
+  }).catch(() => {
+    showToast('复制失败', 'error');
+  });
+}
+
+// 显示加入房间模态框
+function showJoinRoomModal() {
+  openModal('joinRoomModal');
+}
+
+// 加入视频房间
+async function joinVideoRoom(event) {
+  event.preventDefault();
+  
+  const roomId = document.getElementById('joinRoomId').value.trim();
+  const password = document.getElementById('joinRoomPassword').value.trim();
+  
+  if (!roomId) {
+    showToast('请输入房间号', 'error');
+    return;
+  }
+  
+  // 直接跳转到房间页面，密码验证在房间页面进行
+  closeModal('joinRoomModal');
+  const url = password ? `room.html?room=${roomId}&pwd=${encodeURIComponent(password)}` : `room.html?room=${roomId}`;
+  window.open(url, '_blank');
 }
 
 // ==========================================
@@ -1549,7 +1623,7 @@ async function generateInviteCode(e) {
 
 function copyInviteCode() {
   const code = document.getElementById('inviteCodeValue').textContent;
-  copyToClipboard(code).then(() => {
+  navigator.clipboard.writeText(code).then(() => {
     showToast('已复制到剪贴板', 'success');
   });
 }
@@ -2976,554 +3050,3 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
-
-// ==========================================
-// WebRTC 视频房间功能
-// ==========================================
-
-function showCreateRoomModal() {
-  closeAddMenu();
-  if (state.currentUser?.user_nickname) {
-    document.getElementById('roomName').placeholder = `${state.currentUser.user_nickname}的房间`;
-  }
-  openModal('createRoomModal');
-}
-
-function showJoinRoomModal() {
-  closeAddMenu();
-  if (state.currentUser?.user_nickname) {
-    document.getElementById('joinDisplayName').value = state.currentUser.user_nickname;
-  }
-  openModal('joinRoomModal');
-}
-
-async function createVideoRoom(e) {
-  e.preventDefault();
-  
-  const name = document.getElementById('roomName').value || undefined;
-  const password = document.getElementById('roomPassword').value || undefined;
-  const maxParticipants = parseInt(document.getElementById('roomMaxParticipants').value);
-  const expiresMinutes = parseInt(document.getElementById('roomExpires').value);
-  
-  try {
-    showToast('正在创建房间...', 'info');
-    
-    const result = await api('/api/webrtc/rooms', {
-      method: 'POST',
-      body: { name, password, max_participants: maxParticipants, expires_minutes: expiresMinutes }
-    });
-    
-    if (result.success) {
-      const room = result.data;
-      state.webrtc.roomId = room.room_id;
-      state.webrtc.roomPassword = room.password;
-      
-      closeModal('createRoomModal');
-      
-      const roomLink = `${window.location.origin}${window.location.pathname.replace('index.html', '')}room.html?room=${room.room_id}`;
-      
-      showToast(`房间创建成功！房间号: ${room.room_id}`, 'success');
-      updateRoomInfoDisplay(room.room_id, room.password, roomLink);
-      await joinRoomAsCreator(room.room_id);
-    }
-  } catch (err) {
-    showToast('创建房间失败: ' + err.message, 'error');
-  }
-}
-
-async function joinVideoRoom(e) {
-  e.preventDefault();
-  
-  const roomId = document.getElementById('joinRoomId').value.toUpperCase().trim();
-  const password = document.getElementById('joinRoomPassword').value.trim();
-  const displayName = document.getElementById('joinDisplayName').value.trim();
-  
-  try {
-    showToast('正在加入房间...', 'info');
-    
-    const result = await api(`/api/webrtc/rooms/${roomId}/join`, {
-      method: 'POST',
-      body: { password, display_name: displayName },
-      token: ''
-    });
-    
-    if (result.success) {
-      const data = result.data;
-      state.webrtc.roomId = roomId;
-      state.webrtc.roomPassword = password;
-      state.webrtc.wsToken = data.ws_token;
-      state.webrtc.participantId = data.participant_id;
-      state.webrtc.iceServers = data.ice_servers;
-      
-      closeModal('joinRoomModal');
-      
-      const roomLink = `${window.location.origin}${window.location.pathname.replace('index.html', '')}room.html?room=${roomId}`;
-      showToast(`已加入房间: ${data.room_name}`, 'success');
-      updateRoomInfoDisplay(roomId, password, roomLink);
-      await startVideoCall(data.ws_token);
-    }
-  } catch (err) {
-    if (err.message.includes('401')) {
-      showToast('密码错误', 'error');
-    } else if (err.message.includes('404')) {
-      showToast('房间不存在', 'error');
-    } else {
-      showToast('加入房间失败: ' + err.message, 'error');
-    }
-  }
-}
-
-async function joinRoomAsCreator(roomId) {
-  const displayName = state.currentUser?.user_nickname || '创建者';
-  
-  try {
-    const result = await api(`/api/webrtc/rooms/${roomId}/join`, {
-      method: 'POST',
-      body: { password: state.webrtc.roomPassword, display_name: displayName },
-      token: ''
-    });
-    
-    if (result.success) {
-      const data = result.data;
-      state.webrtc.wsToken = data.ws_token;
-      state.webrtc.participantId = data.participant_id;
-      state.webrtc.iceServers = data.ice_servers;
-      await startVideoCall(data.ws_token);
-    }
-  } catch (err) {
-    showToast('加入房间失败: ' + err.message, 'error');
-  }
-}
-
-async function startVideoCall(wsToken) {
-  try {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const hasVideo = devices.some(d => d.kind === 'videoinput');
-    const hasAudio = devices.some(d => d.kind === 'audioinput');
-    
-    console.log(`📷 设备检测: 摄像头=${hasVideo}, 麦克风=${hasAudio}`);
-    
-    let constraints = {};
-    if (hasVideo) constraints.video = true;
-    if (hasAudio) constraints.audio = true;
-    
-    if (hasVideo || hasAudio) {
-      try {
-        state.webrtc.localStream = await navigator.mediaDevices.getUserMedia(constraints);
-      } catch (e) {
-        console.warn('获取媒体流失败，尝试降级:', e);
-        if (hasAudio) {
-          try {
-            state.webrtc.localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            state.webrtc.cameraEnabled = false;
-            showToast('摄像头不可用，仅使用麦克风', 'info');
-          } catch {
-            showToast('媒体设备不可用，将以观看模式加入', 'info');
-          }
-        }
-      }
-      
-      if (state.webrtc.localStream) {
-        document.getElementById('localVideo').srcObject = state.webrtc.localStream;
-        
-        if (!hasVideo || !state.webrtc.localStream.getVideoTracks().length) {
-          state.webrtc.cameraEnabled = false;
-          const btn = document.getElementById('btnCamera');
-          if (btn) { btn.classList.add('muted'); btn.title = '无摄像头'; }
-        }
-        if (!hasAudio || !state.webrtc.localStream.getAudioTracks().length) {
-          state.webrtc.micEnabled = false;
-          const btn = document.getElementById('btnMic');
-          if (btn) { btn.classList.add('muted'); btn.title = '无麦克风'; }
-        }
-      }
-    } else {
-      showToast('未检测到音视频设备，将以观看模式加入', 'info');
-    }
-    
-    openModal('videoCallModal');
-    connectSignaling(wsToken);
-  } catch (err) {
-    console.error('获取媒体设备失败:', err);
-    showToast('媒体设备不可用，将以观看模式加入', 'info');
-    openModal('videoCallModal');
-    connectSignaling(wsToken);
-  }
-}
-
-async function startScreenShare() {
-  try {
-    const screenStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { cursor: 'always' },
-      audio: true
-    });
-    
-    const originalStream = state.webrtc.localStream;
-    state.webrtc.localStream = screenStream;
-    state.webrtc.isScreenSharing = true;
-    document.getElementById('localVideo').srcObject = screenStream;
-    
-    const btn = document.getElementById('btnScreen');
-    if (btn) btn.classList.add('active');
-    
-    const videoTrack = screenStream.getVideoTracks()[0];
-    
-    // 为每个 PeerConnection 添加或替换视频轨道
-    for (const [peerId, pc] of Object.entries(state.webrtc.peerConnections)) {
-      const sender = pc.getSenders().find(s => s.track?.kind === 'video');
-      if (sender) {
-        // 已有视频轨道，直接替换
-        console.log('🔄 替换视频轨道:', peerId);
-        await sender.replaceTrack(videoTrack);
-      } else {
-        // 没有视频轨道，需要添加并重新协商
-        console.log('➕ 添加视频轨道并重新协商:', peerId);
-        pc.addTrack(videoTrack, screenStream);
-        
-        // 重新协商
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        sendSignaling({ type: 'offer', to: peerId, sdp: pc.localDescription.sdp });
-      }
-    }
-    
-    videoTrack.onended = () => stopScreenShare(originalStream);
-    
-    showToast('屏幕共享已开始', 'success');
-  } catch (err) {
-    console.error('屏幕共享失败:', err);
-    if (err.name !== 'AbortError') {
-      showToast('屏幕共享失败: ' + err.message, 'error');
-    }
-  }
-}
-
-async function stopScreenShare(originalStream) {
-  if (!state.webrtc.isScreenSharing) return;
-  
-  if (state.webrtc.localStream) {
-    state.webrtc.localStream.getTracks().forEach(t => t.stop());
-  }
-  
-  state.webrtc.isScreenSharing = false;
-  
-  try {
-    if (originalStream && originalStream.active) {
-      state.webrtc.localStream = originalStream;
-    } else {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const hasVideo = devices.some(d => d.kind === 'videoinput');
-      const hasAudio = devices.some(d => d.kind === 'audioinput');
-      
-      if (hasVideo || hasAudio) {
-        state.webrtc.localStream = await navigator.mediaDevices.getUserMedia({
-          video: hasVideo,
-          audio: hasAudio
-        });
-      }
-    }
-    
-    if (state.webrtc.localStream) {
-      document.getElementById('localVideo').srcObject = state.webrtc.localStream;
-      
-      const videoTrack = state.webrtc.localStream.getVideoTracks()[0];
-      if (videoTrack) {
-        Object.values(state.webrtc.peerConnections).forEach(pc => {
-          const sender = pc.getSenders().find(s => s.track?.kind === 'video');
-          if (sender) sender.replaceTrack(videoTrack);
-        });
-      }
-    }
-  } catch (e) {
-    console.warn('恢复摄像头失败:', e);
-  }
-  
-  const btn = document.getElementById('btnScreen');
-  if (btn) btn.classList.remove('active');
-  
-  showToast('屏幕共享已停止', 'info');
-}
-
-function toggleScreenShare() {
-  if (state.webrtc.isScreenSharing) {
-    stopScreenShare();
-  } else {
-    startScreenShare();
-  }
-}
-
-function connectSignaling(wsToken) {
-  const roomId = state.webrtc.roomId;
-  const wsUrl = `${BASE_URL.replace('http', 'ws')}/ws/webrtc/rooms/${roomId}?token=${wsToken}`;
-  
-  console.log('🔗 连接信令服务器:', wsUrl);
-  
-  const ws = new WebSocket(wsUrl);
-  state.webrtc.signalingWs = ws;
-  
-  ws.onopen = () => {
-    console.log('✅ 信令连接已建立');
-    showToast('已连接到房间', 'success');
-  };
-  
-  ws.onmessage = (event) => {
-    handleSignalingMessage(JSON.parse(event.data));
-  };
-  
-  ws.onclose = () => {
-    console.log('❌ 信令连接已断开');
-    if (state.webrtc.roomId) {
-      showToast('与房间的连接已断开', 'warning');
-    }
-  };
-  
-  ws.onerror = (err) => {
-    console.error('信令错误:', err);
-    showToast('信令连接错误', 'error');
-  };
-}
-
-function handleSignalingMessage(msg) {
-  console.log('📨 收到信令:', msg.type);
-  
-  switch (msg.type) {
-    case 'joined':
-      state.webrtc.participantId = msg.participant_id;
-      state.webrtc.participants = msg.participants;
-      renderParticipants();
-      console.log('📋 房间内已有参与者:', msg.participants.map(p => p.id));
-      msg.participants.forEach(p => {
-        if (p.id !== state.webrtc.participantId) {
-          const shouldOffer = state.webrtc.participantId < p.id;
-          console.log(`🔗 与 ${p.id} 建立连接，我${shouldOffer ? '发起' : '等待'} offer`);
-          createPeerConnection(p.id, shouldOffer);
-        }
-      });
-      break;
-    case 'peer_joined':
-      state.webrtc.participants.push(msg.participant);
-      renderParticipants();
-      showToast(`${msg.participant.name} 加入了房间`, 'info');
-      // 为新参与者创建 PeerConnection（ID 更小的发起 offer）
-      if (state.webrtc.participantId < msg.participant.id) {
-        console.log('🔗 我先加入，我发起 offer:', msg.participant.id);
-        createPeerConnection(msg.participant.id, true);
-      } else {
-        console.log('🔗 新参与者会发起 offer，我等待:', msg.participant.id);
-        createPeerConnection(msg.participant.id, false);
-      }
-      break;
-    case 'peer_left':
-      state.webrtc.participants = state.webrtc.participants.filter(p => p.id !== msg.participant_id);
-      closePeerConnection(msg.participant_id);
-      renderParticipants();
-      showToast('有人离开了房间', 'info');
-      break;
-    case 'offer':
-      handleOffer(msg.from, msg.sdp);
-      break;
-    case 'answer':
-      handleAnswer(msg.from, msg.sdp);
-      break;
-    case 'candidate':
-      handleCandidate(msg.from, msg.candidate);
-      break;
-    case 'room_closed':
-      showToast('房间已关闭: ' + msg.reason, 'warning');
-      leaveRoom();
-      break;
-    case 'error':
-      showToast(msg.message, 'error');
-      break;
-  }
-}
-
-function createPeerConnection(peerId, createOffer = false) {
-  const pc = new RTCPeerConnection({ iceServers: state.webrtc.iceServers });
-  state.webrtc.peerConnections[peerId] = pc;
-  
-  if (state.webrtc.localStream) {
-    state.webrtc.localStream.getTracks().forEach(track => {
-      pc.addTrack(track, state.webrtc.localStream);
-    });
-  }
-  
-  pc.onicecandidate = (event) => {
-    if (event.candidate) {
-      sendSignaling({ type: 'candidate', to: peerId, candidate: event.candidate });
-    }
-  };
-  
-  pc.ontrack = (event) => {
-    console.log('📺 收到远程轨道:', peerId, 'kind:', event.track.kind);
-    if (event.streams && event.streams[0]) {
-      addRemoteVideo(peerId, event.streams[0]);
-    } else {
-      const stream = new MediaStream([event.track]);
-      addRemoteVideo(peerId, stream);
-    }
-  };
-  
-  pc.oniceconnectionstatechange = () => {
-    console.log('🔌 ICE 状态:', peerId, pc.iceConnectionState);
-    if (pc.iceConnectionState === 'failed') {
-      showToast(`与 ${peerId} 的连接失败`, 'error');
-    }
-  };
-  
-  if (createOffer) {
-    pc.createOffer()
-      .then(offer => pc.setLocalDescription(offer))
-      .then(() => sendSignaling({ type: 'offer', to: peerId, sdp: pc.localDescription.sdp }))
-      .catch(err => console.error('创建 Offer 失败:', err));
-  }
-  
-  return pc;
-}
-
-async function handleOffer(peerId, sdp) {
-  let pc = state.webrtc.peerConnections[peerId] || createPeerConnection(peerId, false);
-  await pc.setRemoteDescription({ type: 'offer', sdp });
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
-  sendSignaling({ type: 'answer', to: peerId, sdp: answer.sdp });
-}
-
-async function handleAnswer(peerId, sdp) {
-  const pc = state.webrtc.peerConnections[peerId];
-  if (pc) await pc.setRemoteDescription({ type: 'answer', sdp });
-}
-
-async function handleCandidate(peerId, candidate) {
-  const pc = state.webrtc.peerConnections[peerId];
-  if (pc) await pc.addIceCandidate(new RTCIceCandidate(candidate));
-}
-
-function sendSignaling(msg) {
-  if (state.webrtc.signalingWs?.readyState === WebSocket.OPEN) {
-    state.webrtc.signalingWs.send(JSON.stringify(msg));
-  }
-}
-
-function closePeerConnection(peerId) {
-  const pc = state.webrtc.peerConnections[peerId];
-  if (pc) {
-    pc.close();
-    delete state.webrtc.peerConnections[peerId];
-  }
-  document.getElementById(`video-${peerId}`)?.parentElement?.remove();
-}
-
-function addRemoteVideo(peerId, stream) {
-  const grid = document.getElementById('videoGrid');
-  if (document.getElementById(`video-${peerId}`)) {
-    document.getElementById(`video-${peerId}`).srcObject = stream;
-    return;
-  }
-  
-  const participant = state.webrtc.participants.find(p => p.id === peerId);
-  const container = document.createElement('div');
-  container.className = 'video-item';
-  container.id = `video-container-${peerId}`;
-  container.innerHTML = `<video id="video-${peerId}" autoplay playsinline></video><div class="video-label">${participant?.name || peerId}</div>`;
-  grid.appendChild(container);
-  document.getElementById(`video-${peerId}`).srcObject = stream;
-}
-
-function renderParticipants() {
-  const list = document.getElementById('participantsList');
-  if (!list) return;
-  list.innerHTML = state.webrtc.participants.map(p => `
-    <div class="participant-item ${p.id === state.webrtc.participantId ? 'is-me' : ''}">
-      <span class="participant-name">${p.name}</span>
-      ${p.is_creator ? '<span class="badge">创建者</span>' : ''}
-      ${p.id === state.webrtc.participantId ? '<span class="badge me">我</span>' : ''}
-    </div>
-  `).join('');
-}
-
-function toggleMic() {
-  state.webrtc.micEnabled = !state.webrtc.micEnabled;
-  state.webrtc.localStream?.getAudioTracks().forEach(t => t.enabled = state.webrtc.micEnabled);
-  const btn = document.getElementById('btnMic');
-  btn?.querySelector('.icon-on')?.style.setProperty('display', state.webrtc.micEnabled ? '' : 'none');
-  btn?.querySelector('.icon-off')?.style.setProperty('display', state.webrtc.micEnabled ? 'none' : '');
-  btn?.classList.toggle('muted', !state.webrtc.micEnabled);
-}
-
-function toggleCamera() {
-  state.webrtc.cameraEnabled = !state.webrtc.cameraEnabled;
-  state.webrtc.localStream?.getVideoTracks().forEach(t => t.enabled = state.webrtc.cameraEnabled);
-  const btn = document.getElementById('btnCamera');
-  btn?.querySelector('.icon-on')?.style.setProperty('display', state.webrtc.cameraEnabled ? '' : 'none');
-  btn?.querySelector('.icon-off')?.style.setProperty('display', state.webrtc.cameraEnabled ? 'none' : '');
-  btn?.classList.toggle('muted', !state.webrtc.cameraEnabled);
-}
-
-function toggleParticipants() {
-  const sidebar = document.getElementById('participantsSidebar');
-  if (sidebar) sidebar.style.display = sidebar.style.display === 'none' ? 'block' : 'none';
-  const roomIdEl = document.getElementById('shareRoomId');
-  const pwdEl = document.getElementById('shareRoomPassword');
-  if (roomIdEl) roomIdEl.textContent = state.webrtc.roomId || '-';
-  if (pwdEl) pwdEl.textContent = state.webrtc.roomPassword || '-';
-}
-
-function leaveRoom() {
-  sendSignaling({ type: 'leave' });
-  Object.keys(state.webrtc.peerConnections).forEach(closePeerConnection);
-  state.webrtc.signalingWs?.close();
-  state.webrtc.signalingWs = null;
-  state.webrtc.localStream?.getTracks().forEach(t => t.stop());
-  state.webrtc.localStream = null;
-  
-  const grid = document.getElementById('videoGrid');
-  if (grid) grid.innerHTML = `<div class="video-item local" id="localVideoContainer"><video id="localVideo" autoplay muted playsinline></video><div class="video-label">我</div></div>`;
-  
-  state.webrtc.roomId = null;
-  state.webrtc.roomPassword = null;
-  state.webrtc.wsToken = null;
-  state.webrtc.participantId = null;
-  state.webrtc.iceServers = [];
-  state.webrtc.participants = [];
-  state.webrtc.peerConnections = {};
-  state.webrtc.isScreenSharing = false;
-  
-  closeModal('videoCallModal');
-  document.getElementById('currentRoomInfo')?.style.setProperty('display', 'none');
-  showToast('已离开房间', 'info');
-}
-
-function updateRoomInfoDisplay(roomId, password, link) {
-  const roomIdEl = document.getElementById('currentRoomId');
-  const passwordEl = document.getElementById('currentRoomPassword');
-  const linkEl = document.getElementById('currentRoomLink');
-  const infoEl = document.getElementById('currentRoomInfo');
-  
-  if (roomIdEl) roomIdEl.textContent = roomId;
-  if (passwordEl) passwordEl.textContent = password;
-  if (linkEl) linkEl.textContent = link;
-  if (infoEl) infoEl.style.display = 'block';
-}
-
-function copyRoomId() {
-  copyToClipboard(state.webrtc.roomId || '');
-  showToast('房间号已复制', 'success');
-}
-
-function copyRoomPassword() {
-  copyToClipboard(state.webrtc.roomPassword || '');
-  showToast('密码已复制', 'success');
-}
-
-function copyRoomLink() {
-  const link = `${window.location.origin}${window.location.pathname.replace('index.html', '')}room.html?room=${state.webrtc.roomId}`;
-  copyToClipboard(link);
-  showToast('房间链接已复制', 'success');
-}
-
-function copyRoomInfo() {
-  const link = `${window.location.origin}${window.location.pathname.replace('index.html', '')}room.html?room=${state.webrtc.roomId}`;
-  copyToClipboard(link);
-  showToast('房间链接已复制', 'success');
-}

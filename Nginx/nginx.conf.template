@@ -13,6 +13,17 @@ http {
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
 
+    # ============================================
+    # 动态 CORS Origin 处理
+    # 根据请求的 Origin 判断是否在允许列表中
+    # 环境变量格式: CORS_ALLOWED_ORIGINS=https://dev.huanvae.cn|https://web.huanvae.cn
+    # 使用 | 分隔多个域名，支持 * 表示允许所有
+    # ============================================
+    map $http_origin $cors_origin {
+        default "";
+        "~*^(${CORS_ALLOWED_ORIGINS})$" $http_origin;
+    }
+
     # 日志格式
     log_format main '$remote_addr - $remote_user [$time_local] "$request" '
                     '$status $body_bytes_sent "$http_referer" '
@@ -82,7 +93,7 @@ http {
         location = /ws {
             # CORS 预检请求处理
             if ($request_method = 'OPTIONS') {
-                add_header 'Access-Control-Allow-Origin' '${CORS_ALLOWED_ORIGINS}' always;
+                add_header 'Access-Control-Allow-Origin' $cors_origin always;
                 add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
                 add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, Accept' always;
                 add_header 'Access-Control-Allow-Credentials' 'true' always;
@@ -155,7 +166,7 @@ http {
         location /api/ {
             # CORS 预检请求处理
             if ($request_method = 'OPTIONS') {
-                add_header 'Access-Control-Allow-Origin' '${CORS_ALLOWED_ORIGINS}' always;
+                add_header 'Access-Control-Allow-Origin' $cors_origin always;
                 add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, PATCH, OPTIONS' always;
                 add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, Accept' always;
                 add_header 'Access-Control-Allow-Credentials' 'true' always;
@@ -166,7 +177,7 @@ http {
             }
 
             # 正常请求的 CORS 响应头
-            add_header 'Access-Control-Allow-Origin' '${CORS_ALLOWED_ORIGINS}' always;
+            add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Allow-Credentials' 'true' always;
 
             proxy_pass http://backend;
@@ -194,7 +205,7 @@ http {
         location ~ ^/(user-file|friends-file|group-file|avatars)/ {
             # CORS 预检请求处理（支持 PUT 上传）
             if ($request_method = 'OPTIONS') {
-                add_header 'Access-Control-Allow-Origin' '${CORS_ALLOWED_ORIGINS}' always;
+                add_header 'Access-Control-Allow-Origin' $cors_origin always;
                 add_header 'Access-Control-Allow-Methods' 'GET, PUT, HEAD, OPTIONS' always;
                 add_header 'Access-Control-Allow-Headers' 'Content-Type, Content-Length, Authorization' always;
                 add_header 'Access-Control-Max-Age' 3600 always;
@@ -204,7 +215,7 @@ http {
             }
 
             # 正常请求的 CORS 响应头
-            add_header 'Access-Control-Allow-Origin' '${CORS_ALLOWED_ORIGINS}' always;
+            add_header 'Access-Control-Allow-Origin' $cors_origin always;
             add_header 'Access-Control-Expose-Headers' 'ETag' always;
 
             proxy_pass http://minio_api;

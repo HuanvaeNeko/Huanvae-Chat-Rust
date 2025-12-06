@@ -533,9 +533,12 @@
 
   <script>
     // 动态获取 BASE_URL
-    const BASE_URL = window.location.port === '8888' || window.location.port === '5500'
-      ? `${window.location.protocol}//${window.location.hostname}`
-      : window.location.origin;
+    // 根据当前域名自动选择 API 地址
+    const BASE_URL = window.location.hostname.startsWith('web.') 
+      ? `${window.location.protocol}//api.${window.location.hostname.slice(4)}`  // web.xxx -> api.xxx
+      : (window.location.port === '8888' || window.location.port === '5500')
+        ? `${window.location.protocol}//${window.location.hostname}`  // 本地开发（去除端口）
+        : window.location.origin;  // 其他情况使用当前地址
 
     // 复制文本到剪贴板（兼容非 HTTPS 环境）
     function copyToClipboard(text) {
