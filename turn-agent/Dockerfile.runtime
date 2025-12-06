@@ -1,7 +1,7 @@
 # Turn Agent Runtime Dockerfile
 # 使用预编译的二进制文件，无需 Rust 编译环境
 # 
-# 使用前先编译: cargo build --release
+# 使用前先编译: cargo build --release && cp target/release/turn-agent bin/
 
 FROM ubuntu:24.04
 
@@ -14,8 +14,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# 复制预编译的二进制文件（需要先在本地编译）
-COPY target/release/turn-agent /app/turn-agent
+# 复制预编译的二进制文件
+# 优先使用 bin/ 目录（git 版本），其次使用 target/release/（本地编译）
+COPY bin/turn-agent /app/turn-agent
 
 # 复制配置模板
 COPY config/turnserver.conf.template /app/templates/
