@@ -32,16 +32,29 @@ vim .env
 | `COORDINATOR_URL` | 主服务器 WebSocket 地址 |
 | `COORDINATOR_TOKEN` | Agent 认证令牌（从主服务器获取）|
 
-### 3. 一键启动
+### 3. 启动方式
+
+**方式一：使用预编译二进制（推荐，更快）**
 
 ```bash
-./scripts/setup.sh
+# 先在开发机编译
+cargo build --release
+
+# 然后启动容器
+docker compose up -d
 ```
 
-或手动启动：
+**方式二：容器内编译（较慢，需要完整 Rust 环境）**
 
 ```bash
-docker compose up -d
+docker compose -f compose.yaml -f compose.build.yaml up -d --build
+```
+
+**方式三：直接运行二进制（无需容器）**
+
+```bash
+# 直接运行
+./target/release/turn-agent
 ```
 
 ## 配置说明

@@ -20,6 +20,11 @@ use protocol::{AgentMessage, CoordinatorMessage, NodeCapabilities, NodeCommand, 
 
 #[tokio::main]
 async fn main() {
+    // 安装 rustls 加密后端
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     // 初始化日志
     tracing_subscriber::fmt()
         .with_env_filter(

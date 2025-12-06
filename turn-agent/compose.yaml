@@ -1,5 +1,8 @@
 # Turn Agent + Coturn 服务编排
 # 使用方法: docker compose up -d
+#
+# 默认使用预编译二进制文件（需先执行 cargo build --release --target x86_64-unknown-linux-musl）
+# 如需容器内编译，使用: docker compose -f compose.yaml -f compose.build.yaml up -d
 
 services:
   # ============================================
@@ -8,7 +11,7 @@ services:
   turn-agent:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.runtime
     container_name: turn-agent
     # 使用 host 网络模式，方便访问宿主机服务
     network_mode: host

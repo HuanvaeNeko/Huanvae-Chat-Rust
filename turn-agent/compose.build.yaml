@@ -1,0 +1,9 @@
+# 容器内构建覆盖配置
+# 使用方法: docker compose -f compose.yaml -f compose.build.yaml up -d --build
+
+services:
+  turn-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+

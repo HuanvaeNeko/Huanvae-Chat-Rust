@@ -1,0 +1,35 @@
+# Turn Agent Runtime Dockerfile
+# 使用预编译的二进制文件，无需 Rust 编译环境
+# 
+# 使用前先编译: cargo build --release
+
+FROM ubuntu:24.04
+
+# 安装运行时依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 复制预编译的二进制文件（需要先在本地编译）
+COPY target/release/turn-agent /app/turn-agent
+
+# 复制配置模板
+COPY config/turnserver.conf.template /app/templates/
+
+# 复制健康检查脚本
+COPY scripts/health-check.sh /app/health-check
+RUN chmod +x /app/health-check /app/turn-agent
+
+# 创建数据目录
+RUN mkdir -p /etc/turnserver /var/log/turnserver
+
+# 设置环境变量默认值
+ENV LOG_LEVEL=info
+ENV HEARTBEAT_INTERVAL=5
+
+ENTRYPOINT ["/app/turn-agent"]
+
