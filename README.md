@@ -1,1 +1,1 @@
-用于huanvaechat的后端接口调取，提供了前端的调取示例
+本文档提供 Huanvae Chat 后端的 API 接口使用示例
